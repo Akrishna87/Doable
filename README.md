@@ -24,38 +24,59 @@ keeps everything.
 
 ## What it does
 
+Doable aims to have everything in Todoist Pro except the AI and the things that need a
+server (see the end of this list).
+
 - **Quick Add**: tap **+** and type a task in plain words. Doable highlights what it
   understands as you type:
 
   | Type | For |
   |---|---|
   | `today`, `tomorrow`, `friday`, `next week`, `this weekend`, `in 3 days`, `dec 25`, `2026-12-25` | the due date |
-  | `9am`, `6:30pm`, `21:00`, `at 5`, `noon`, `tonight` | the time (and a reminder) |
+  | `9am`, `6:30pm`, `21:00`, `at 5`, `noon`, `tonight` | the time |
+  | `for 30min`, `for 1.5h` | how long it takes |
+  | `{friday}`, `{dec 31}` | a deadline |
+  | `!30min`, `!1h`, `!8am` | a reminder before the due time, or at a time |
   | `p1` `p2` `p3` | priority (red, orange, blue) |
-  | `#Work` | an existing project |
+  | `#Work`, `/Doing` | an existing project, and a section in it |
   | `@errands` | labels (new ones are made as you go) |
-  | `every day`, `every weekday`, `every monday`, `weekly`, `every month`, `yearly` | repeating tasks |
+  | `every day`, `every weekday`, `every mon, wed`, `every 3 days`, `every 2nd tue`, `every last day`, `every! 2 weeks` (counted from when you complete it) | repeating tasks |
 
   For example: `Pay rent friday 9am p1 #Home @bills every month`. The chips under the
-  text set the same things by hand, and the panel stays open for the next task.
-- **Today** shows overdue tasks (with **Reschedule** to move them all to today), then
-  today's tasks, and a progress bar for the day.
-- **Upcoming** lists the next four weeks day by day, with a week strip to jump around and
-  a **+** on each day.
-- **Inbox and projects**: tasks without a project go to the Inbox. Make projects with a
-  colour in **Browse**. **Labels** collect tasks across projects.
-- **Task details**: tap a task to change its title, description, date, time, repeat,
-  priority, project and labels, switch its reminder on or off, and add **sub-tasks**.
-- **Swipe** a task right to complete it or left to delete it, with **Undo** either way.
-  Completing a repeating task moves it to its next date. **Completed** in Browse keeps a
-  history you can bring tasks back from.
-- **Reminders** notify you at a task's time, with a **Complete** button on the
-  notification.
-- **Search**, **light and dark themes**, and a **home screen widget** ("Doable: Today")
-  for today's and overdue tasks.
+  text set the same things by hand, and the panel stays open for the next task. You can
+  also share text to Doable from any app, use the **Quick Settings tile**, or long-press
+  the app icon.
+- **Today** shows overdue tasks (with **Reschedule**), then today's, with a progress bar;
+  **Upcoming** shows the coming days as a list or a month calendar. Both can be sorted,
+  grouped and filtered from their view options.
+- **Projects** with sub-projects, **sections**, favourites, colours and archiving, viewed
+  as a **list**, a **board** (a column per section) or a **calendar**, each with its own
+  sort, grouping and "show completed". Drag to reorder, move tasks between projects and
+  sections, and import or export a project as a **Todoist CSV** (which works as a
+  template).
+- **Labels** and **saved filters** in Todoist's filter language, for example
+  `today | overdue`, `#Work & p1`, `@home* & !no date`, `due before: next week`,
+  `has: comments`, and comma-separated lists like `today, overdue`.
+- **Task details**: description, due date and time, **duration**, **deadline**,
+  **repeat** (including a custom repeat dialog), priority, project, section, labels,
+  **several reminders**, **sub-tasks**, **comments** with **attachments** and photos,
+  duplicate, copy as text, and the task's history. The repeat dialog can also end a
+  repeat on a date.
+- **Swipe** actions you can choose for each direction (complete, schedule, delete), with **Undo**.
+  Completing a repeating task moves it to its next date. **Completed** keeps a history you
+  can bring tasks back from, and the **activity log** shows everything you've done.
+- **Productivity**: Karma points and levels, daily and weekly goals, streaks, days off
+  and vacation mode.
+- **Reminders** with **Complete** and **Snooze** on the notification, an automatic
+  reminder at the due time if you want one, and an optional daily summary.
+- **Search** (plain words or a filter query), **light and dark themes** with accent
+  colours, a choice of start page, and a **home screen widget** for today's tasks.
 - **Backup**: Settings → Export backup saves everything to a JSON file, and Restore from
   backup reads one back. A **Daybook** backup restores too: Doable takes its tasks and
   projects and leaves the notes.
+
+Left out, because they need an account and a server: syncing between devices, shared
+projects, assigning tasks to people, and calendar feeds.
 
 ## How it's built
 
