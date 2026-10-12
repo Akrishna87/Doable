@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Long-press the app icon: add a task, or open Today, Upcoming or Search. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_add"
+        android:shortcutId="add"
+        android:shortcutShortLabel="@string/shortcut_add">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetClass="io.github.akrishna87.doable.MainActivity"
+            android:targetPackage="io.github.akrishna87.doable">
+            <extra android:name="quick_add" android:value="true" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_today"
+        android:shortcutId="today"
+        android:shortcutShortLabel="@string/shortcut_today">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetClass="io.github.akrishna87.doable.MainActivity"
+            android:targetPackage="io.github.akrishna87.doable">
+            <extra android:name="open" android:value="today" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_upcoming"
+        android:shortcutId="upcoming"
+        android:shortcutShortLabel="@string/shortcut_upcoming">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetClass="io.github.akrishna87.doable.MainActivity"
+            android:targetPackage="io.github.akrishna87.doable">
+            <extra android:name="open" android:value="upcoming" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_search"
+        android:shortcutId="search"
+        android:shortcutShortLabel="@string/shortcut_search">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetClass="io.github.akrishna87.doable.MainActivity"
+            android:targetPackage="io.github.akrishna87.doable">
+            <extra android:name="open" android:value="search" />
+        </intent>
+    </shortcut>
+</shortcuts>

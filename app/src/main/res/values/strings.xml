@@ -3,4 +3,10 @@
     <string name="app_name">Doable</string>
     <string name="widget_name">Doable: Today</string>
     <string name="widget_description">Today\'s and overdue tasks. Tick them off or add one.</string>
+    <string name="share_label">Add to Doable</string>
+    <string name="tile_label">Add task</string>
+    <string name="shortcut_add">Add task</string>
+    <string name="shortcut_today">Today</string>
+    <string name="shortcut_upcoming">Upcoming</string>
+    <string name="shortcut_search">Search</string>
 </resources>

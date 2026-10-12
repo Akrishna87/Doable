@@ -1,13 +1,17 @@
 package io.github.akrishna87.doable.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -16,20 +20,30 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ViewList
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.EventAvailable
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.FilterList
 import androidx.compose.material.icons.rounded.Inbox
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.KeyboardArrowUp
+import androidx.compose.material.icons.rounded.Label
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.TaskAlt
-import androidx.compose.material.icons.rounded.EventAvailable
-import androidx.compose.material.icons.rounded.Label
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -38,6 +52,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -50,19 +65,30 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.akrishna87.doable.Store
+import io.github.akrishna87.doable.model.Csv
 import io.github.akrishna87.doable.model.Data
 import io.github.akrishna87.doable.model.Dates
+import io.github.akrishna87.doable.model.Filters
+import io.github.akrishna87.doable.model.GroupBy
 import io.github.akrishna87.doable.model.INBOX_ID
 import io.github.akrishna87.doable.model.Project
 import io.github.akrishna87.doable.model.ProjectColors
+import io.github.akrishna87.doable.model.ProjectView
+import io.github.akrishna87.doable.model.Section
+import io.github.akrishna87.doable.model.SortBy
 import io.github.akrishna87.doable.model.Task
+import io.github.akrishna87.doable.model.ViewOptions
 import java.time.Instant
 import java.time.LocalDate
+import java.time.YearMonth
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
@@ -75,9 +101,12 @@ fun TodayScreen(data: Data, padding: PaddingValues) {
     val actions = LocalActions.current
     val extra = LocalExtra.current
     val today = LocalClock.current.today
-    val overdue = Dates.overdue(data.tasks, today)
-    val due = Dates.dueOn(data.tasks, today)
-    val doneToday = Dates.completedOn(data.tasks, today).size
+    val options = data.settings.todayOptions
+    var viewing by remember { mutableStateOf(false) }
+    val overdue = Dates.sorted(Dates.overdue(data.tasks, today), options)
+    val due = Dates.sorted(Dates.dueOn(data.tasks, today), options)
+    val completed = Dates.completedOn(data.tasks, today)
+    val doneToday = completed.size
 
     LazyColumn(
         Modifier.fillMaxSize(),
@@ -85,12 +114,13 @@ fun TodayScreen(data: Data, padding: PaddingValues) {
     ) {
         item(key = "header") {
             ScreenHeader("Today", DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.getDefault()).format(today)) {
-                SearchAction { nav.push(Page.Search) }
+                IconButton(onClick = { viewing = true }, Modifier.semantics { contentDescription = "View options" }) { Icon(Icons.Rounded.Tune, null) }
+                SearchAction()
             }
         }
         val total = doneToday + due.size + overdue.size
         if (total > 0) {
-            item(key = "progress") { DayProgress(doneToday, total) }
+            item(key = "progress") { DayProgress(doneToday, total, data.settings.dailyGoal) }
         }
         if (overdue.isNotEmpty()) {
             item(key = "overdue") {
@@ -107,8 +137,11 @@ fun TodayScreen(data: Data, padding: PaddingValues) {
             }
             item(key = "today-header") { SectionHeader(Dates.dayHeading(today, today)) }
         }
-        items(due, key = { it.id }) { t ->
-            SwipeTask(t, Modifier.animateItem()) { TaskRow(t, data, showDue = t.time != null, timeOnly = true) { nav.push(Page.TaskPage(t.id)) } }
+        for ((heading, list) in Dates.grouped(due, options.copy(group = if (options.group == GroupBy.DATE) GroupBy.NONE else options.group), data, today)) {
+            if (heading.isNotEmpty()) item(key = "g-$heading") { SectionHeader(heading) }
+            items(list, key = { "$heading|${it.id}" }) { t ->
+                SwipeTask(t, Modifier.animateItem()) { TaskRow(t, data, showDue = t.time != null, timeOnly = true) { nav.push(Page.TaskPage(t.id)) } }
+            }
         }
         if (overdue.isEmpty() && due.isEmpty()) {
             item(key = "empty") {
@@ -123,11 +156,23 @@ fun TodayScreen(data: Data, padding: PaddingValues) {
                 }
             }
         }
+        if (options.showCompleted && completed.isNotEmpty()) {
+            item(key = "done-h") { SectionHeader("Completed today · ${completed.size}") }
+            items(completed, key = { "done-" + it.id }) { t -> TaskRow(t, data) { nav.push(Page.TaskPage(t.id)) } }
+        }
+    }
+    if (viewing) {
+        ViewOptionsDialog(
+            options,
+            onChange = { o -> Store.updateSettings { it.copy(todayOptions = o) } },
+            onDismiss = { viewing = false },
+            groups = listOf(GroupBy.NONE, GroupBy.PRIORITY, GroupBy.PROJECT, GroupBy.LABEL),
+        )
     }
 }
 
 @Composable
-private fun DayProgress(done: Int, total: Int) {
+private fun DayProgress(done: Int, total: Int, goal: Int) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         LinearProgressIndicator(
             progress = { if (total == 0) 0f else done / total.toFloat() },
@@ -136,7 +181,12 @@ private fun DayProgress(done: Int, total: Int) {
             trackColor = MaterialTheme.colorScheme.surfaceVariant,
             drawStopIndicator = {},
         )
-        Text("$done/$total done", Modifier.padding(start = 12.dp), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            "$done/$total done" + if (done >= goal) " · goal met" else "",
+            Modifier.padding(start = 12.dp),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -156,7 +206,7 @@ private sealed interface UpRow {
     }
 }
 
-/** The next four weeks day by day, with a week strip to jump around. */
+/** The next four weeks day by day, with a week strip to jump around; or a month grid. */
 @Composable
 fun UpcomingScreen(data: Data, padding: PaddingValues) {
     val nav = LocalNav.current
@@ -168,6 +218,7 @@ fun UpcomingScreen(data: Data, padding: PaddingValues) {
     var selected by remember(today) { mutableStateOf(today) }
     var scrollTo by remember { mutableStateOf<LocalDate?>(null) }
     var picking by remember { mutableStateOf(false) }
+    var monthView by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
     val overdue = Dates.overdue(data.tasks, today)
@@ -201,9 +252,16 @@ fun UpcomingScreen(data: Data, padding: PaddingValues) {
             "Upcoming",
             selected.month.getDisplayName(TextStyle.FULL_STANDALONE, Locale.getDefault()) + " " + selected.year,
         ) {
-            if (weekStart != firstWeek) TextButton(onClick = { jump(today) }) { Text("Today") }
-            IconButton(onClick = { picking = true }, Modifier.semantics { contentDescription = "Pick a date" }) { Icon(Icons.Rounded.CalendarMonth, null) }
-            SearchAction { nav.push(Page.Search) }
+            if (!monthView && weekStart != firstWeek) TextButton(onClick = { jump(today) }) { Text("Today") }
+            IconButton(onClick = { monthView = !monthView }, Modifier.semantics { contentDescription = if (monthView) "Show as list" else "Show as month" }) {
+                Icon(if (monthView) Icons.AutoMirrored.Rounded.ViewList else Icons.Rounded.CalendarMonth, null)
+            }
+            if (!monthView) IconButton(onClick = { picking = true }, Modifier.semantics { contentDescription = "Pick a date" }) { Icon(Icons.Rounded.EventAvailable, null) }
+            SearchAction()
+        }
+        if (monthView) {
+            TaskMonth(data.tasks.filter { !it.done }, data, padding.calculateBottomPadding())
+            return@Column
         }
         WeekStrip(weekStart, selected, today, data, ws, onWeek = { weekStart = it }, onDay = { jump(it) })
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -227,6 +285,75 @@ fun UpcomingScreen(data: Data, padding: PaddingValues) {
         }
     }
     if (picking) DatePickDialog(selected, onPick = { jump(it) }, onDismiss = { picking = false })
+}
+
+/** A month grid with a dot for each day's tasks, and the picked day's tasks under it. */
+@Composable
+fun TaskMonth(tasks: List<Task>, data: Data, bottom: androidx.compose.ui.unit.Dp, defaults: QuickAddDefaults = QuickAddDefaults()) {
+    val nav = LocalNav.current
+    val today = LocalClock.current.today
+    val ws = Dates.weekStart(data.settings)
+    var month by remember { mutableStateOf(YearMonth.from(today)) }
+    var selected by remember { mutableStateOf(today) }
+    val grid = remember(month, ws) { Dates.monthGrid(month, ws) }
+    val byDay = remember(tasks) { tasks.filter { it.due != null }.groupBy { it.due!! } }
+    Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = { month = month.minusMonths(1) }, Modifier.semantics { contentDescription = "Previous month" }) { Icon(Icons.Rounded.ChevronLeft, null) }
+            Text(
+                DateTimeFormatter.ofPattern(if (month.year == today.year) "MMMM" else "MMMM yyyy", Locale.getDefault()).format(month),
+                Modifier.weight(1f),
+                textAlign = TextAlign.Center,
+                style = MaterialTheme.typography.titleMedium,
+            )
+            IconButton(onClick = { month = month.plusMonths(1) }, Modifier.semantics { contentDescription = "Next month" }) { Icon(Icons.Rounded.ChevronRight, null) }
+        }
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+            for (l in Dates.weekdayLetters(ws)) Text(l, Modifier.weight(1f), textAlign = TextAlign.Center, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        for (week in grid) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+                for (d in week) {
+                    Column(
+                        Modifier.weight(1f).height(46.dp).clip(RoundedCornerShape(10.dp))
+                            .then(if (d != null) Modifier.clickable { selected = d } else Modifier),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        if (d != null) {
+                            val isSel = d == selected
+                            Box(
+                                Modifier.padding(top = 4.dp).size(28.dp).clip(CircleShape)
+                                    .background(if (isSel) MaterialTheme.colorScheme.primary else Color.Transparent),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    d.dayOfMonth.toString(),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = if (d == today || isSel) FontWeight.Bold else FontWeight.Normal,
+                                    color = when {
+                                        isSel -> MaterialTheme.colorScheme.onPrimary
+                                        d == today -> MaterialTheme.colorScheme.primary
+                                        else -> MaterialTheme.colorScheme.onSurface
+                                    },
+                                )
+                            }
+                            val n = byDay[d]?.size ?: 0
+                            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                                repeat(n.coerceAtMost(3)) { Box(Modifier.padding(top = 2.dp).size(4.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary)) }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        HorizontalDivider(Modifier.padding(top = 4.dp), color = MaterialTheme.colorScheme.outlineVariant)
+        val list = Dates.sorted(byDay[selected].orEmpty(), ViewOptions(sort = SortBy.DATE))
+        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = bottom + 88.dp)) {
+            item { DayHeader(selected, today) { nav.quickAdd = defaults.copy(due = selected) } }
+            if (list.isEmpty()) item { Text("Nothing due", Modifier.padding(20.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            items(list, key = { it.id }) { t -> SwipeTask(t) { TaskRow(t, data, showDue = t.time != null, timeOnly = true) { nav.push(Page.TaskPage(t.id)) } } }
+        }
+    }
 }
 
 @Composable
@@ -312,11 +439,13 @@ private fun DayHeader(day: LocalDate, today: LocalDate, onAdd: () -> Unit) {
     }
 }
 
-/** A project's (or the Inbox's) tasks. */
+/** A project's (or the Inbox's) tasks, as a list with sections, a board, or a calendar. */
 @Composable
 fun ProjectPage(id: String, data: Data) {
     val nav = LocalNav.current
-    val project = if (id == INBOX_ID) Project.Inbox else data.projects.firstOrNull { it.id == id }
+    val context = LocalContext.current
+    val actions = LocalActions.current
+    val project = if (id == INBOX_ID) Project.Inbox.copy(options = data.settings.inboxOptions, view = data.settings.inboxView) else data.projects.firstOrNull { it.id == id }
     if (project == null) {
         LaunchedEffect(Unit) { nav.pop() }
         return
@@ -324,31 +453,145 @@ fun ProjectPage(id: String, data: Data) {
     var menu by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
-    val open = Dates.inProject(data.tasks, id)
-    val done = data.tasks.filter { it.done && it.projectId == id && it.parentId == null }.sortedByDescending { it.doneAt }
-    TaskListPage(
-        title = project.name,
-        color = if (id == INBOX_ID) null else project.color,
-        open = open,
-        done = done,
-        data = data,
-        defaults = QuickAddDefaults(projectId = id),
-        showProject = false,
-        emptyTitle = if (id == INBOX_ID) "Your Inbox is empty" else "No tasks yet",
-        emptyMessage = if (id == INBOX_ID) "Tasks without a project land here. Tap + to add one." else "Tap + to add the first task to ${project.name}.",
-    ) {
-        if (id != INBOX_ID) {
-            Box {
-                IconButton(onClick = { menu = true }, Modifier.semantics { contentDescription = "Project options" }) { Icon(Icons.Rounded.MoreVert, null) }
-                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    DropdownMenuItem(text = { Text("Edit project") }, onClick = { menu = false; editing = true })
-                    DropdownMenuItem(
-                        text = { Text("Delete project", color = MaterialTheme.colorScheme.error) },
-                        onClick = { menu = false; deleting = true },
-                    )
+    var viewing by remember { mutableStateOf(false) }
+    var addingSection by remember { mutableStateOf(false) }
+    var addingSub by remember { mutableStateOf(false) }
+    var reorder by remember { mutableStateOf(false) }
+    val options = project.options
+    val sections = data.sectionsOf(id)
+    val inProject = data.tasks.filter { it.projectId == id }
+    val open = inProject.filter { !it.done }
+    val done = inProject.filter { it.done && it.parentId == null }.sortedByDescending { it.doneAt }
+    fun saveOptions(o: ViewOptions) = if (id == INBOX_ID) Store.updateSettings { it.copy(inboxOptions = o) } else Store.saveProject(project.copy(options = o))
+    fun saveView(v: ProjectView) = if (id == INBOX_ID) Store.updateSettings { it.copy(inboxView = v) } else Store.saveProject(project.copy(view = v))
+    val exporter = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("text/csv")) { uri ->
+        if (uri != null) {
+            val ok = runCatching {
+                context.contentResolver.openOutputStream(uri, "wt")!!.use { it.write(Csv.export(project, Store.data.value).toByteArray()) }
+            }.isSuccess
+            actions.message(if (ok) "Template saved" else "Couldn't save the file")
+        }
+    }
+
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.surface,
+        topBar = {
+            Column(Modifier.statusBarsPadding()) {
+                PageBar(
+                    onBack = { nav.pop() },
+                    leading = {
+                        if (id == INBOX_ID) Icon(Icons.Rounded.Inbox, null, tint = Color(ProjectColors.Inbox)) else ColorDot(project.color, 12.dp)
+                        Spacer(Modifier.width(10.dp))
+                        Text(project.name, Modifier.weight(10f, fill = false), style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    },
+                    actions = {
+                        if (reorder) {
+                            TextButton(onClick = { reorder = false }) { Text("Done") }
+                        } else {
+                            IconButton(onClick = { viewing = true }, Modifier.semantics { contentDescription = "View options" }) { Icon(Icons.Rounded.Tune, null) }
+                        }
+                        Box {
+                            IconButton(onClick = { menu = true }, Modifier.semantics { contentDescription = "Project options" }) { Icon(Icons.Rounded.MoreVert, null) }
+                            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                                if (id != INBOX_ID) DropdownMenuItem(text = { Text("Edit project") }, onClick = { menu = false; editing = true })
+                                DropdownMenuItem(text = { Text("Add section") }, onClick = { menu = false; addingSection = true })
+                                if (id != INBOX_ID) DropdownMenuItem(text = { Text("Add sub-project") }, onClick = { menu = false; addingSub = true })
+                                if (project.view == ProjectView.LIST) {
+                                    DropdownMenuItem(text = { Text("Reorder tasks") }, onClick = {
+                                        menu = false
+                                        saveOptions(options.copy(sort = SortBy.MANUAL, group = GroupBy.NONE))
+                                        reorder = true
+                                    })
+                                }
+                                if (id != INBOX_ID) {
+                                    DropdownMenuItem(text = { Text(if (project.favorite) "Remove from favourites" else "Add to favourites") }, onClick = {
+                                        menu = false
+                                        Store.saveProject(project.copy(favorite = !project.favorite))
+                                    })
+                                }
+                                DropdownMenuItem(text = { Text("Export as a template (CSV)") }, onClick = {
+                                    menu = false
+                                    exporter.launch(project.name.replace(Regex("[^\\p{L}\\p{N} _-]"), "") + ".csv")
+                                })
+                                if (id != INBOX_ID) {
+                                    DropdownMenuItem(text = { Text("Archive") }, onClick = {
+                                        menu = false
+                                        Store.archiveProject(id, true)
+                                        nav.pop()
+                                        actions.offerUndo("${project.name} archived") { Store.archiveProject(id, false) }
+                                    })
+                                    DropdownMenuItem(text = { Text("Delete project", color = MaterialTheme.colorScheme.error) }, onClick = { menu = false; deleting = true })
+                                }
+                            }
+                        }
+                    },
+                )
+            }
+        },
+        floatingActionButton = { if (!reorder) Fab("Add task") { nav.quickAdd = QuickAddDefaults(projectId = id) } },
+    ) { padding ->
+        when (project.view) {
+            ProjectView.BOARD -> Board(project, sections, open, data, padding)
+            ProjectView.CALENDAR -> Box(Modifier.padding(top = padding.calculateTopPadding())) {
+                TaskMonth(open, data, padding.calculateBottomPadding(), QuickAddDefaults(projectId = id))
+            }
+            ProjectView.LIST -> LazyColumn(
+                Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding() + 88.dp),
+            ) {
+                val topLevel = open.filter { it.parentId == null }
+                if (open.isEmpty() && sections.isEmpty()) {
+                    item(key = "empty") {
+                        EmptyState(
+                            Icons.Rounded.TaskAlt,
+                            if (id == INBOX_ID) "Your Inbox is empty" else "No tasks yet",
+                            if (id == INBOX_ID) "Tasks without a project land here. Tap + to add one." else "Tap + to add the first task to ${project.name}.",
+                        )
+                    }
+                }
+                val bySection = options.sort == SortBy.MANUAL || options.group == GroupBy.NONE
+                if (bySection && options.group == GroupBy.NONE) {
+                    val loose = Dates.sorted(topLevel.filter { it.sectionId == null }, options)
+                    taskTree(loose, open, data, reorder)
+                    for (s in sections) {
+                        val inSection = Dates.sorted(topLevel.filter { it.sectionId == s.id }, options)
+                        item(key = "s-${s.id}") { SectionRow(s, inSection.size, data, reorder) }
+                        if (!s.collapsed) taskTree(inSection, open, data, reorder)
+                    }
+                    item(key = "add-section") {
+                        Row(
+                            Modifier.fillMaxWidth().clickable { addingSection = true }.padding(horizontal = 20.dp, vertical = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Rounded.Add, null, tint = MaterialTheme.colorScheme.primary)
+                            Text("Add section", Modifier.padding(start = 16.dp), color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                } else {
+                    for ((heading, list) in Dates.grouped(Dates.sorted(topLevel, options), options, data, LocalDate.now())) {
+                        if (heading.isNotEmpty()) item(key = "g-$heading") { SectionHeader(heading) }
+                        taskTree(list, open, data, false, heading)
+                    }
+                }
+                if (options.showCompleted && done.isNotEmpty()) {
+                    item(key = "done-h") { SectionHeader("Completed · ${done.size}") }
+                    items(done, key = { "done-" + it.id }) { t -> TaskRow(t, data, showProject = false) { nav.push(Page.TaskPage(t.id)) } }
                 }
             }
         }
+    }
+    if (viewing) {
+        ViewOptionsDialog(options, onChange = { saveOptions(it) }, onDismiss = { viewing = false }, view = project.view, onView = { saveView(it) },
+            groups = listOf(GroupBy.NONE, GroupBy.DATE, GroupBy.PRIORITY, GroupBy.LABEL))
+    }
+    if (addingSection) {
+        NameDialog(title = "Add section", confirm = "Add", onSave = { name, _ -> Store.saveSection(Section(projectId = id, name = name)) }, onDismiss = { addingSection = false })
+    }
+    if (addingSub) {
+        NameDialog(
+            title = "Add sub-project", confirm = "Add", colors = ProjectColors.choices, initialColor = project.color,
+            onSave = { name, color -> Store.saveProject(Project(name = name, color = color, parentId = id)) }, onDismiss = { addingSub = false },
+        )
     }
     if (editing) {
         NameDialog(
@@ -356,14 +599,17 @@ fun ProjectPage(id: String, data: Data) {
             initial = project.name,
             colors = ProjectColors.choices,
             initialColor = project.color,
-            onSave = { name, color -> Store.saveProject(project.copy(name = name, color = color)) },
+            favorite = project.favorite,
+            onSave = { name, color -> Store.saveProject(Store.data.value.projects.first { it.id == id }.copy(name = name, color = color)) },
+            onFavorite = { fav -> Store.saveProject(Store.data.value.projects.first { it.id == id }.copy(favorite = fav)) },
             onDismiss = { editing = false },
         )
     }
     if (deleting) {
+        val subs = data.projectAndChildren(id).size - 1
         ConfirmDialog(
             title = "Delete project?",
-            text = "This deletes “${project.name}” and its ${open.size + done.size} tasks. It can't be undone.",
+            text = "This deletes “${project.name}”" + (if (subs > 0) ", its $subs sub-projects" else "") + " and all their tasks. It can't be undone. To keep them, archive the project instead.",
             confirm = "Delete",
             onConfirm = {
                 Store.deleteProject(project.id)
@@ -374,45 +620,198 @@ fun ProjectPage(id: String, data: Data) {
     }
 }
 
+/** Top-level tasks, each followed by its sub-tasks (indented, open ones only), with move arrows in reorder mode. */
+/** [group] keeps keys apart when a task shows in more than one group (grouped by label). */
+private fun LazyListScope.taskTree(list: List<Task>, open: List<Task>, data: Data, reorder: Boolean, group: String = "") {
+    for ((i, t) in list.withIndex()) {
+        item(key = "t-$group-${t.id}") {
+            val nav = LocalNav.current
+            if (reorder) {
+                ReorderRow(t, data, canUp = i > 0, canDown = i < list.lastIndex,
+                    onUp = { Store.placeTask(t.id, list[i - 1].id, list) },
+                    onDown = { Store.placeTask(t.id, list.getOrNull(i + 2)?.id, list) })
+            } else {
+                SwipeTask(t, Modifier.animateItem()) { TaskRow(t, data, showProject = false) { nav.push(Page.TaskPage(t.id)) } }
+            }
+        }
+        if (!reorder) {
+            val subs = open.filter { it.parentId == t.id }.sortedWith(compareBy({ it.order }, { it.createdAt }))
+            items(subs, key = { "t-$group-${it.id}" }) { s ->
+                val nav = LocalNav.current
+                SwipeTask(s, Modifier.animateItem().padding(start = 28.dp)) { TaskRow(s, data, showProject = false) { nav.push(Page.TaskPage(s.id)) } }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReorderRow(t: Task, data: Data, canUp: Boolean, canDown: Boolean, onUp: () -> Unit, onDown: () -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.weight(1f)) { TaskRow(t, data, showProject = false) {} }
+        IconButton(onClick = onUp, enabled = canUp, modifier = Modifier.semantics { contentDescription = "Move ${t.title} up" }) { Icon(Icons.Rounded.KeyboardArrowUp, null) }
+        IconButton(onClick = onDown, enabled = canDown, modifier = Modifier.semantics { contentDescription = "Move ${t.title} down" }) { Icon(Icons.Rounded.KeyboardArrowDown, null) }
+    }
+}
+
+/** A section's heading: collapse, its count, and a menu to add, rename, move or delete. */
+@Composable
+private fun SectionRow(s: Section, count: Int, data: Data, reorder: Boolean) {
+    val nav = LocalNav.current
+    var menu by remember { mutableStateOf(false) }
+    var renaming by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf(false) }
+    Column {
+        Row(
+            Modifier.fillMaxWidth().clickable { Store.saveSection(s.copy(collapsed = !s.collapsed)) }.padding(start = 8.dp, end = 4.dp, top = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(if (s.collapsed) Icons.Rounded.ChevronRight else Icons.Rounded.ExpandMore, if (s.collapsed) "Expand ${s.name}" else "Collapse ${s.name}")
+            Text(s.name, Modifier.weight(1f).padding(start = 6.dp), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            Text(count.toString(), Modifier.padding(end = 4.dp), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (reorder) {
+                IconButton(onClick = { Store.moveSection(s.id, -1) }, Modifier.semantics { contentDescription = "Move section ${s.name} up" }) { Icon(Icons.Rounded.ExpandLess, null) }
+                IconButton(onClick = { Store.moveSection(s.id, 1) }, Modifier.semantics { contentDescription = "Move section ${s.name} down" }) { Icon(Icons.Rounded.ExpandMore, null) }
+            } else {
+                Box {
+                    IconButton(onClick = { menu = true }, Modifier.semantics { contentDescription = "Section ${s.name} options" }) { Icon(Icons.Rounded.MoreVert, null) }
+                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        DropdownMenuItem(text = { Text("Add task") }, onClick = { menu = false; nav.quickAdd = QuickAddDefaults(projectId = s.projectId, sectionId = s.id) })
+                        DropdownMenuItem(text = { Text("Rename section") }, onClick = { menu = false; renaming = true })
+                        DropdownMenuItem(text = { Text("Move up") }, onClick = { menu = false; Store.moveSection(s.id, -1) })
+                        DropdownMenuItem(text = { Text("Move down") }, onClick = { menu = false; Store.moveSection(s.id, 1) })
+                        DropdownMenuItem(text = { Text("Archive section") }, onClick = { menu = false; Store.saveSection(s.copy(archived = true)) })
+                        DropdownMenuItem(text = { Text("Delete section", color = MaterialTheme.colorScheme.error) }, onClick = { menu = false; deleting = true })
+                    }
+                }
+            }
+        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    }
+    if (renaming) NameDialog(title = "Rename section", initial = s.name, onSave = { name, _ -> Store.saveSection(s.copy(name = name)) }, onDismiss = { renaming = false })
+    if (deleting) {
+        val n = data.tasks.count { it.sectionId == s.id }
+        ConfirmDialog("Delete section?", "“${s.name}” and its $n tasks are deleted.", "Delete", onConfirm = { Store.deleteSection(s.id) }, onDismiss = { deleting = false })
+    }
+}
+
+/** Board view: a column per section (and one for tasks without a section), side by side. */
+@Composable
+private fun Board(project: Project, sections: List<Section>, open: List<Task>, data: Data, padding: PaddingValues) {
+    val topLevel = open.filter { it.parentId == null }
+    val loose = Dates.sorted(topLevel.filter { it.sectionId == null }, project.options)
+    var addingSection by remember { mutableStateOf(false) }
+    Row(
+        Modifier.fillMaxSize().padding(top = padding.calculateTopPadding() + 4.dp, bottom = padding.calculateBottomPadding()).horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
+    ) {
+        if (loose.isNotEmpty() || sections.isEmpty()) {
+            BoardColumn("(No section)", null, project.id, loose, open, data)
+        }
+        for (s in sections) BoardColumn(s.name, s, project.id, Dates.sorted(topLevel.filter { it.sectionId == s.id }, project.options), open, data)
+        Box(Modifier.width(220.dp).padding(8.dp)) {
+            TextButton(onClick = { addingSection = true }) {
+                Icon(Icons.Rounded.Add, null)
+                Text("Add section", Modifier.padding(start = 8.dp))
+            }
+        }
+    }
+    if (addingSection) {
+        NameDialog(title = "Add section", confirm = "Add", onSave = { name, _ -> Store.saveSection(Section(projectId = project.id, name = name)) }, onDismiss = { addingSection = false })
+    }
+}
+
+@Composable
+private fun BoardColumn(title: String, section: Section?, projectId: String, tasks: List<Task>, open: List<Task>, data: Data) {
+    val nav = LocalNav.current
+    Column(
+        Modifier
+            .width(290.dp)
+            .fillMaxHeight()
+            .padding(horizontal = 6.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerLow),
+    ) {
+        if (section != null) {
+            SectionRow(section, tasks.size, data, reorder = false)
+        } else {
+            Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 12.dp, top = 16.dp, bottom = 8.dp)) {
+                Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                Text(tasks.size.toString(), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        if (section?.collapsed != true) {
+            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
+                for (t in tasks) {
+                    Surface(
+                        Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)
+                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp)),
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                    ) {
+                        val subs = open.count { it.parentId == t.id }
+                        Column {
+                            TaskRow(t, data, showProject = false) { nav.push(Page.TaskPage(t.id)) }
+                            if (subs > 0) Text("$subs sub-tasks", Modifier.padding(start = 48.dp, bottom = 6.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+            TextButton(onClick = { nav.quickAdd = QuickAddDefaults(projectId = projectId, sectionId = section?.id) }, Modifier.padding(4.dp).semantics { contentDescription = "Add task to $title" }) {
+                Icon(Icons.Rounded.Add, null)
+                Text("Add task", Modifier.padding(start = 8.dp))
+            }
+        }
+    }
+}
+
 /** Tasks with a label. */
 @Composable
 fun LabelPage(name: String, data: Data) {
     val nav = LocalNav.current
     var menu by remember { mutableStateOf(false) }
-    var renaming by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
-    val open = Dates.withLabel(data.tasks, name)
+    val info = data.labelInfo(name)
+    val open = data.tasks.filter { t -> !t.done && t.labels.any { it.equals(name, true) } }
     val done = data.tasks.filter { t -> t.done && t.labels.any { it.equals(name, true) } }.sortedByDescending { it.doneAt }
     TaskListPage(
         title = "@$name",
-        color = null,
+        icon = { Icon(Icons.Rounded.Label, null, tint = Color(info.color)) },
         open = open,
         done = done,
         data = data,
+        options = info.options,
+        onOptions = { o -> Store.saveLabel(info.copy(options = o)) },
         defaults = QuickAddDefaults(labels = listOf(name)),
-        showProject = true,
         emptyTitle = "Nothing labelled @$name",
         emptyMessage = "Tasks with this label show up here.",
     ) {
         Box {
             IconButton(onClick = { menu = true }, Modifier.semantics { contentDescription = "Label options" }) { Icon(Icons.Rounded.MoreVert, null) }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                DropdownMenuItem(text = { Text("Rename label") }, onClick = { menu = false; renaming = true })
+                DropdownMenuItem(text = { Text("Edit label") }, onClick = { menu = false; editing = true })
+                DropdownMenuItem(text = { Text(if (info.favorite) "Remove from favourites" else "Add to favourites") }, onClick = { menu = false; Store.saveLabel(info.copy(favorite = !info.favorite)) })
                 DropdownMenuItem(text = { Text("Delete label", color = MaterialTheme.colorScheme.error) }, onClick = { menu = false; deleting = true })
             }
         }
     }
-    if (renaming) {
+    if (editing) {
         NameDialog(
-            title = "Rename label",
+            title = "Edit label",
             initial = name,
-            onSave = { new, _ ->
+            colors = ProjectColors.choices,
+            initialColor = info.color,
+            favorite = info.favorite,
+            onSave = { new, color ->
                 val clean = new.removePrefix("@").replace(" ", "-")
-                Store.renameLabel(name, clean)
-                nav.pop()
-                nav.push(Page.LabelPage(clean))
+                if (!clean.equals(name, true)) Store.renameLabel(name, clean)
+                Store.saveLabel(Store.data.value.labelInfo(clean).copy(name = clean, color = color))
+                if (clean != name) {
+                    nav.pop()
+                    nav.push(Page.LabelPage(clean))
+                }
             },
-            onDismiss = { renaming = false },
+            onFavorite = { fav -> Store.saveLabel(Store.data.value.labelInfo(name).copy(favorite = fav)) },
+            onDismiss = { editing = false },
         )
     }
     if (deleting) {
@@ -429,21 +828,20 @@ fun LabelPage(name: String, data: Data) {
     }
 }
 
+/** A saved filter's tasks, one list per comma-separated part of its query. */
 @Composable
-private fun TaskListPage(
-    title: String,
-    color: Int?,
-    open: List<Task>,
-    done: List<Task>,
-    data: Data,
-    defaults: QuickAddDefaults,
-    showProject: Boolean,
-    emptyTitle: String,
-    emptyMessage: String,
-    actions: @Composable RowScope.() -> Unit,
-) {
+fun FilterPage(id: String, data: Data) {
     val nav = LocalNav.current
-    var showDone by remember { mutableStateOf(false) }
+    val today = LocalClock.current.today
+    val f = data.filter(id)
+    if (f == null) {
+        LaunchedEffect(Unit) { nav.pop() }
+        return
+    }
+    var menu by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf(false) }
+    var viewing by remember { mutableStateOf(false) }
+    val result = Filters.run(f.query, data, today, Dates.weekStart(data.settings))
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surface,
         topBar = {
@@ -451,19 +849,81 @@ private fun TaskListPage(
                 PageBar(
                     onBack = { nav.pop() },
                     leading = {
-                        if (color != null) {
-                            ColorDot(color, 12.dp)
-                            Spacer(Modifier.width(10.dp))
-                        } else if (title == "Inbox") {
-                            Icon(Icons.Rounded.Inbox, null, tint = Color(ProjectColors.Inbox))
-                            Spacer(Modifier.width(10.dp))
-                        } else {
-                            Icon(Icons.Rounded.Label, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Spacer(Modifier.width(10.dp))
+                        Icon(Icons.Rounded.FilterList, null, tint = Color(f.color))
+                        Spacer(Modifier.width(10.dp))
+                        Text(f.name, Modifier.weight(10f, fill = false), style = MaterialTheme.typography.titleLarge, maxLines = 1)
+                    },
+                    actions = {
+                        IconButton(onClick = { viewing = true }, Modifier.semantics { contentDescription = "View options" }) { Icon(Icons.Rounded.Tune, null) }
+                        Box {
+                            IconButton(onClick = { menu = true }, Modifier.semantics { contentDescription = "Filter options" }) { Icon(Icons.Rounded.MoreVert, null) }
+                            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                                DropdownMenuItem(text = { Text("Edit filter") }, onClick = { menu = false; editing = true })
+                                DropdownMenuItem(text = { Text(if (f.favorite) "Remove from favourites" else "Add to favourites") }, onClick = { menu = false; Store.saveFilter(f.copy(favorite = !f.favorite)) })
+                                DropdownMenuItem(text = { Text("Delete filter", color = MaterialTheme.colorScheme.error) }, onClick = { menu = false; Store.deleteFilter(f.id); nav.pop() })
+                            }
                         }
+                    },
+                )
+                Text(f.query, Modifier.padding(start = 20.dp, bottom = 6.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+        floatingActionButton = { Fab("Add task") { nav.quickAdd = QuickAddDefaults(due = today) } },
+    ) { padding ->
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding() + 88.dp)) {
+            val groups = result.getOrNull()
+            if (groups == null) {
+                item { EmptyState(Icons.Rounded.FilterList, "This filter has a mistake", result.exceptionOrNull()?.message ?: "") }
+            } else {
+                val many = groups.size > 1
+                for ((gi, g) in groups.withIndex()) {
+                    val (query, tasks) = g
+                    if (many) item(key = "q-$gi") { SectionHeader("$query · ${tasks.size}") }
+                    for ((heading, list) in Dates.grouped(Dates.sorted(tasks, f.options), f.options, data, today)) {
+                        if (heading.isNotEmpty()) item(key = "g-$gi-$heading") { SectionHeader(heading) }
+                        items(list, key = { "t-$gi-$heading-${it.id}" }) { t -> SwipeTask(t) { TaskRow(t, data) { nav.push(Page.TaskPage(t.id)) } } }
+                    }
+                    if (tasks.isEmpty() && !many) item { EmptyState(Icons.Rounded.TaskAlt, "Nothing matches", "No open tasks match “${f.query}”.") }
+                }
+            }
+        }
+    }
+    if (viewing) ViewOptionsDialog(f.options, onChange = { Store.saveFilter(f.copy(options = it)) }, onDismiss = { viewing = false })
+    if (editing) FilterDialog(f, onDismiss = { editing = false })
+}
+
+@Composable
+private fun TaskListPage(
+    title: String,
+    icon: @Composable () -> Unit,
+    open: List<Task>,
+    done: List<Task>,
+    data: Data,
+    options: ViewOptions,
+    onOptions: (ViewOptions) -> Unit,
+    defaults: QuickAddDefaults,
+    emptyTitle: String,
+    emptyMessage: String,
+    actions: @Composable RowScope.() -> Unit,
+) {
+    val nav = LocalNav.current
+    val today = LocalClock.current.today
+    var viewing by remember { mutableStateOf(false) }
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.surface,
+        topBar = {
+            Column(Modifier.statusBarsPadding()) {
+                PageBar(
+                    onBack = { nav.pop() },
+                    leading = {
+                        icon()
+                        Spacer(Modifier.width(10.dp))
                         Text(title, Modifier.weight(10f, fill = false), style = MaterialTheme.typography.titleLarge, maxLines = 1)
                     },
-                    actions = actions,
+                    actions = {
+                        IconButton(onClick = { viewing = true }, Modifier.semantics { contentDescription = "View options" }) { Icon(Icons.Rounded.Tune, null) }
+                        actions()
+                    },
                 )
             }
         },
@@ -474,21 +934,19 @@ private fun TaskListPage(
             contentPadding = PaddingValues(top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding() + 88.dp),
         ) {
             if (open.isEmpty()) item(key = "empty") { EmptyState(Icons.Rounded.TaskAlt, emptyTitle, emptyMessage) }
-            items(open, key = { it.id }) { t ->
-                SwipeTask(t, Modifier.animateItem()) { TaskRow(t, data, showProject = showProject) { nav.push(Page.TaskPage(t.id)) } }
+            for ((heading, list) in Dates.grouped(Dates.sorted(open, options), options, data, today)) {
+                if (heading.isNotEmpty()) item(key = "g-$heading") { SectionHeader(heading) }
+                items(list, key = { "$heading|${it.id}" }) { t ->
+                    SwipeTask(t, Modifier.animateItem()) { TaskRow(t, data) { nav.push(Page.TaskPage(t.id)) } }
+                }
             }
-            if (done.isNotEmpty()) {
-                item(key = "done-toggle") {
-                    TextButton(onClick = { showDone = !showDone }, Modifier.padding(start = 8.dp, top = 8.dp)) {
-                        Text(if (showDone) "Hide completed" else "Show completed (${done.size})")
-                    }
-                }
-                if (showDone) {
-                    items(done, key = { "done-" + it.id }) { t -> TaskRow(t, data, showProject = showProject) { nav.push(Page.TaskPage(t.id)) } }
-                }
+            if (options.showCompleted && done.isNotEmpty()) {
+                item(key = "done-h") { SectionHeader("Completed · ${done.size}") }
+                items(done, key = { "done-" + it.id }) { t -> TaskRow(t, data) { nav.push(Page.TaskPage(t.id)) } }
             }
         }
     }
+    if (viewing) ViewOptionsDialog(options, onChange = onOptions, onDismiss = { viewing = false })
 }
 
 /** Finished tasks by the day they were finished. Tap a circle to bring a task back. */

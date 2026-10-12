@@ -9,8 +9,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import io.github.akrishna87.doable.model.Accent
 import io.github.akrishna87.doable.model.ThemeMode
 
 /** Colours that aren't part of Material's scheme: due-date tones and swipe actions. */
@@ -50,11 +52,11 @@ private val DarkExtra = Extra(
 
 val LocalExtra = staticCompositionLocalOf { LightExtra }
 
-private val LightColors = lightColorScheme(
-    primary = Color(0xFF5B5BD6),
+private fun lightColors(a: Accent) = lightColorScheme(
+    primary = Color(a.light),
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFE6E6FB),
-    onPrimaryContainer = Color(0xFF23236B),
+    primaryContainer = lerp(Color.White, Color(a.light), 0.14f),
+    onPrimaryContainer = lerp(Color(a.light), Color.Black, 0.5f),
     secondary = Color(0xFF5F6170),
     onSecondary = Color.White,
     secondaryContainer = Color(0xFFEDEDF2),
@@ -77,14 +79,14 @@ private val LightColors = lightColorScheme(
     onError = Color.White,
     inverseSurface = Color(0xFF2B2B33),
     inverseOnSurface = Color(0xFFF2F2F5),
-    inversePrimary = Color(0xFFA5A6F6),
+    inversePrimary = Color(a.dark),
 )
 
-private val DarkColors = darkColorScheme(
-    primary = Color(0xFF9FA0F5),
-    onPrimary = Color(0xFF1C1C5E),
-    primaryContainer = Color(0xFF3B3B9C),
-    onPrimaryContainer = Color(0xFFE3E3FB),
+private fun darkColors(a: Accent) = darkColorScheme(
+    primary = Color(a.dark),
+    onPrimary = lerp(Color(a.light), Color.Black, 0.6f),
+    primaryContainer = lerp(Color(0xFF121216), Color(a.light), 0.45f),
+    onPrimaryContainer = lerp(Color.White, Color(a.dark), 0.2f),
     secondary = Color(0xFFA6A7B5),
     onSecondary = Color(0xFF1C1C21),
     secondaryContainer = Color(0xFF2A2A32),
@@ -107,7 +109,7 @@ private val DarkColors = darkColorScheme(
     onError = Color(0xFF3A0905),
     inverseSurface = Color(0xFFE8E8EE),
     inverseOnSurface = Color(0xFF1C1C21),
-    inversePrimary = Color(0xFF5B5BD6),
+    inversePrimary = Color(a.light),
 )
 
 private val AppTypography = Typography().let { t ->
@@ -130,8 +132,10 @@ fun isDark(mode: ThemeMode): Boolean = when (mode) {
 }
 
 @Composable
-fun DoableTheme(dark: Boolean, content: @Composable () -> Unit) {
-    androidx.compose.runtime.CompositionLocalProvider(LocalExtra provides if (dark) DarkExtra else LightExtra) {
-        MaterialTheme(colorScheme = if (dark) DarkColors else LightColors, typography = AppTypography, content = content)
+fun DoableTheme(dark: Boolean, accent: Accent = Accent.INDIGO, content: @Composable () -> Unit) {
+    val extra = if (dark) DarkExtra.copy(highlight = lerp(Color(0xFF121216), Color(accent.light), 0.4f))
+    else LightExtra.copy(highlight = lerp(Color.White, Color(accent.light), 0.18f))
+    androidx.compose.runtime.CompositionLocalProvider(LocalExtra provides extra) {
+        MaterialTheme(colorScheme = if (dark) darkColors(accent) else lightColors(accent), typography = AppTypography, content = content)
     }
 }

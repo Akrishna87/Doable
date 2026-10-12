@@ -3,6 +3,7 @@ package io.github.akrishna87.doable.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,6 +25,8 @@ import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.CalendarToday
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Flag
+import androidx.compose.material.icons.automirrored.rounded.Comment
 import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.SubdirectoryArrowRight
@@ -64,7 +67,7 @@ import io.github.akrishna87.doable.model.Dates
 import io.github.akrishna87.doable.model.DueTone
 import io.github.akrishna87.doable.model.INBOX_ID
 import io.github.akrishna87.doable.model.Priority
-import io.github.akrishna87.doable.model.Repeat
+import io.github.akrishna87.doable.model.SwipeAction
 import io.github.akrishna87.doable.model.Task
 import java.time.LocalDateTime
 
@@ -152,12 +155,15 @@ fun TaskRow(
                 }
                 val due = when {
                     !showDue -> null
-                    timeOnly && task.time != null -> Dates.timeFormatter(clock.is24Hour).format(task.time)
-                    else -> Dates.dueLabel(task, clock.today, clock.is24Hour)
+                    timeOnly && task.time != null -> Dates.timeRange(task, clock.is24Hour)
+                    else -> Dates.dueLabel(task, clock.today, clock.is24Hour)?.let { label ->
+                        if (task.duration != null && task.time != null) "$label · ${Dates.durationLabel(task.duration)}" else label
+                    }
                 }
                 val project = data.project(task.projectId).takeIf { showProject && (task.projectId != INBOX_ID || task.parentId == null) }
-                val hasMeta = due != null || subs.isNotEmpty() || task.labels.isNotEmpty() || task.parentId != null ||
-                    (showProject && task.projectId != INBOX_ID)
+                val section = data.section(task.sectionId)?.takeIf { showProject }
+                val hasMeta = due != null || subs.isNotEmpty() || task.labels.isNotEmpty() || task.parentId != null || task.deadline != null ||
+                    task.comments.isNotEmpty() || (showProject && task.projectId != INBOX_ID)
                 if (hasMeta) {
                     FlowRow(
                         Modifier.padding(top = 4.dp),
@@ -167,13 +173,18 @@ fun TaskRow(
                         if (due != null) {
                             val c = toneColor(Dates.tone(task, clock.now))
                             Meta(Icons.Rounded.CalendarToday, due, c)
-                            if (task.repeat != Repeat.NONE) Icon(Icons.Rounded.Repeat, task.repeat.label, Modifier.size(14.dp).align(Alignment.CenterVertically), tint = c)
+                            if (task.repeat != null) Icon(Icons.Rounded.Repeat, task.repeat.label(), Modifier.size(14.dp).align(Alignment.CenterVertically), tint = c)
+                        }
+                        if (task.deadline != null && !task.done) {
+                            val late = task.deadline.isBefore(clock.today)
+                            Meta(Icons.Rounded.Flag, Dates.deadlineLabel(task.deadline, clock.today), if (late || task.deadline == clock.today) LocalExtra.current.overdue else muted)
                         }
                         if (subs.isNotEmpty()) Meta(Icons.Rounded.SubdirectoryArrowRight, "${subs.count { it.done }}/${subs.size}", muted)
-                        for (l in task.labels) Text("@$l", style = MaterialTheme.typography.labelMedium, color = muted)
+                        if (task.comments.isNotEmpty()) Meta(Icons.AutoMirrored.Rounded.Comment, task.comments.size.toString(), muted)
+                        for (l in task.labels) Text("@$l", style = MaterialTheme.typography.labelMedium, color = labelColor(data, l, muted))
                         if (project != null && task.projectId != INBOX_ID) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(project.name, style = MaterialTheme.typography.labelMedium, color = muted)
+                                Text(project.name + (section?.let { " / ${it.name}" } ?: ""), style = MaterialTheme.typography.labelMedium, color = muted)
                                 Spacer(Modifier.width(4.dp))
                                 Box(Modifier.size(7.dp).clip(CircleShape).background(Color(project.color)))
                             }
@@ -195,17 +206,20 @@ private fun Meta(icon: ImageVector, text: String, color: Color) {
     }
 }
 
-/** Swipe right to complete, left to delete, with Undo in the snackbar. */
+/** Swiping a task: what each direction does is set in Settings (complete, schedule or delete, with Undo). */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SwipeTask(task: Task, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     val actions = LocalActions.current
     val extra = LocalExtra.current
+    val settings = io.github.akrishna87.doable.Store.data.value.settings
+    val right = settings.swipeRight
+    val left = settings.swipeLeft
     val state = rememberSwipeToDismissBoxState(
         confirmValueChange = { value ->
             when (value) {
-                SwipeToDismissBoxValue.StartToEnd -> actions.toggle(task)
-                SwipeToDismissBoxValue.EndToStart -> actions.delete(task)
+                SwipeToDismissBoxValue.StartToEnd -> actions.swipe(task, right)
+                SwipeToDismissBoxValue.EndToStart -> actions.swipe(task, left)
                 SwipeToDismissBoxValue.Settled -> {}
             }
             // Snap back: the list itself drops the task (or keeps a repeating one with its new date).
@@ -215,17 +229,31 @@ fun SwipeTask(task: Task, modifier: Modifier = Modifier, content: @Composable ()
     SwipeToDismissBox(
         state = state,
         modifier = modifier,
+        enableDismissFromStartToEnd = right != SwipeAction.NONE,
+        enableDismissFromEndToStart = left != SwipeAction.NONE,
         backgroundContent = {
             val toStart = state.dismissDirection == SwipeToDismissBoxValue.EndToStart
+            val action = if (toStart) left else right
+            val (bg, icon) = when (action) {
+                SwipeAction.COMPLETE -> extra.complete to Icons.Rounded.Check
+                SwipeAction.SCHEDULE -> extra.thisWeek to Icons.Rounded.CalendarToday
+                SwipeAction.DELETE -> extra.delete to Icons.Rounded.Delete
+                SwipeAction.NONE -> Color.Transparent to Icons.Rounded.Check
+            }
             Box(
-                Modifier.fillMaxSize().background(if (toStart) extra.delete else extra.complete).padding(horizontal = 24.dp),
+                Modifier.fillMaxSize().background(bg).padding(horizontal = 24.dp),
                 contentAlignment = if (toStart) Alignment.CenterEnd else Alignment.CenterStart,
             ) {
-                Icon(if (toStart) Icons.Rounded.Delete else Icons.Rounded.Check, null, tint = Color.White)
+                if (action != SwipeAction.NONE) Icon(icon, null, tint = Color.White)
             }
         },
     ) { content() }
 }
+
+/** A label's own colour, or [fallback] for one without. */
+@Composable
+fun labelColor(data: Data, name: String, fallback: Color): Color =
+    data.labelInfo.firstOrNull { it.name.equals(name, true) }?.let { Color(it.color) } ?: fallback
 
 /** A big screen title with an optional line under it and action icons on the right. */
 @Composable
@@ -252,6 +280,13 @@ fun PageBar(title: String = "", onBack: () -> Unit, leading: @Composable RowScop
         }
         actions()
     }
+}
+
+/** The magnifier: opens the Search tab. */
+@Composable
+fun SearchAction() {
+    val nav = LocalNav.current
+    SearchAction { nav.pages.clear(); nav.tab = Tab.SEARCH }
 }
 
 @Composable
@@ -294,6 +329,7 @@ fun ColorDot(color: Int, size: Dp = 10.dp) {
 }
 
 /** A row in Browse and Settings: an icon, a label, and a count or control on the right. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun ListRow(
     label: String,
@@ -302,11 +338,18 @@ fun ListRow(
     detail: String? = null,
     trailing: @Composable RowScope.() -> Unit = {},
     onClick: (() -> Unit)? = null,
+    onLongClick: (() -> Unit)? = null,
 ) {
     Row(
         modifier
             .fillMaxWidth()
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .then(
+                when {
+                    onLongClick != null -> Modifier.combinedClickable(onClick = onClick ?: {}, onLongClick = onLongClick)
+                    onClick != null -> Modifier.clickable(onClick = onClick)
+                    else -> Modifier
+                },
+            )
             .padding(start = 20.dp, end = 12.dp)
             .height(if (detail != null) 64.dp else 52.dp),
         verticalAlignment = Alignment.CenterVertically,

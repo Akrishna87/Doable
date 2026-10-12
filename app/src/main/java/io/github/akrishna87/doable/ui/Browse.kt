@@ -7,6 +7,9 @@ import android.os.Build
 import android.provider.Settings as AndroidSettings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -14,20 +17,29 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Archive
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.Delete
-import androidx.compose.material.icons.rounded.DeleteForever
+import androidx.compose.material.icons.rounded.FilterList
+import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Inbox
+import androidx.compose.material.icons.rounded.Insights
 import androidx.compose.material.icons.rounded.Label
-import androidx.compose.material.icons.rounded.RestoreFromTrash
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Star
+import androidx.compose.material.icons.rounded.Unarchive
+import androidx.compose.material.icons.rounded.UploadFile
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -45,6 +57,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
@@ -52,32 +65,42 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.akrishna87.doable.Backup
 import io.github.akrishna87.doable.Reminders
 import io.github.akrishna87.doable.Store
+import io.github.akrishna87.doable.model.Accent
+import io.github.akrishna87.doable.model.Csv
 import io.github.akrishna87.doable.model.Data
 import io.github.akrishna87.doable.model.Dates
+import io.github.akrishna87.doable.model.Filters
 import io.github.akrishna87.doable.model.INBOX_ID
 import io.github.akrishna87.doable.model.Project
 import io.github.akrishna87.doable.model.ProjectColors
+import io.github.akrishna87.doable.model.Reminder
+import io.github.akrishna87.doable.model.SwipeAction
 import io.github.akrishna87.doable.model.ThemeMode
+import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.LocalTime
+import java.time.format.TextStyle
+import java.util.Locale
 
-/** The Inbox, projects, labels, completed tasks and settings. */
+/** The Inbox, favourites, projects (with sub-projects), filters and labels, and everything else. */
 @Composable
 fun BrowseScreen(data: Data, padding: PaddingValues) {
     val nav = LocalNav.current
     var newProject by remember { mutableStateOf(false) }
     val open = data.tasks.filter { !it.done && it.parentId == null }
+    val favProjects = data.projects.filter { it.favorite && !it.archived }
+    val favLabels = data.labelInfo.filter { it.favorite }
+    val favFilters = data.filters.filter { it.favorite }
     LazyColumn(
         Modifier.fillMaxSize(),
         contentPadding = PaddingValues(top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding() + 88.dp),
     ) {
         item {
             ScreenHeader("Browse") {
-                SearchAction { nav.push(Page.Search) }
                 IconButton(onClick = { nav.push(Page.SettingsPage) }, Modifier.semantics { contentDescription = "Settings" }) { Icon(Icons.Rounded.Settings, null) }
             }
         }
@@ -89,12 +112,27 @@ fun BrowseScreen(data: Data, padding: PaddingValues) {
                 onClick = { nav.push(Page.ProjectPage(INBOX_ID)) },
             )
         }
+        if (favProjects.isNotEmpty() || favLabels.isNotEmpty() || favFilters.isNotEmpty()) {
+            item { SectionHeader("Favourites") }
+            items(favProjects, key = { "fp-" + it.id }) { p ->
+                ListRow(p.name, leading = { Text("#", style = MaterialTheme.typography.titleLarge, color = Color(p.color)) },
+                    trailing = { Count(open.count { it.projectId == p.id }) }, onClick = { nav.push(Page.ProjectPage(p.id)) })
+            }
+            items(favFilters, key = { "ff-" + it.id }) { f ->
+                ListRow(f.name, leading = { Icon(Icons.Rounded.FilterList, null, tint = Color(f.color)) }, onClick = { nav.push(Page.FilterPage(f.id)) })
+            }
+            items(favLabels, key = { "fl-" + it.name }) { l ->
+                ListRow(l.name, leading = { Icon(Icons.Rounded.Label, null, tint = Color(l.color)) },
+                    trailing = { Count(open.count { t -> t.labels.any { it.equals(l.name, true) } }) }, onClick = { nav.push(Page.LabelPage(l.name)) })
+            }
+        }
         item {
             SectionHeader("My projects") {
                 IconButton(onClick = { newProject = true }, Modifier.semantics { contentDescription = "Add project" }) { Icon(Icons.Rounded.Add, null) }
             }
         }
-        if (data.projects.isEmpty()) {
+        val tree = data.projectTree()
+        if (tree.isEmpty()) {
             item {
                 Text(
                     "Group tasks into projects, like Work or Home. Tap + to add one.",
@@ -104,26 +142,14 @@ fun BrowseScreen(data: Data, padding: PaddingValues) {
                 )
             }
         }
-        items(data.projects.sortedBy { it.createdAt }, key = { it.id }) { p ->
-            ListRow(
-                p.name,
-                leading = { Text("#", style = MaterialTheme.typography.titleLarge, color = Color(p.color)) },
-                trailing = { Count(open.count { it.projectId == p.id }) },
-                onClick = { nav.push(Page.ProjectPage(p.id)) },
-            )
-        }
-        if (data.labels.isNotEmpty()) {
-            item { SectionHeader("Labels") }
-            items(data.labels, key = { "label-$it" }) { l ->
-                ListRow(
-                    l,
-                    leading = { Icon(Icons.Rounded.Label, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
-                    trailing = { Count(open.count { t -> t.labels.any { it.equals(l, true) } }) },
-                    onClick = { nav.push(Page.LabelPage(l)) },
-                )
-            }
+        items(tree, key = { "p-" + it.first.id }) { (p, depth) ->
+            ProjectRow(p, depth, open.count { it.projectId == p.id })
         }
         item { SectionHeader("More") }
+        item {
+            ListRow("Filters & Labels", leading = { Icon(Icons.Rounded.FilterList, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                trailing = { Count(data.filters.size + data.labels.size) }, onClick = { nav.push(Page.FiltersLabels) })
+        }
         item {
             ListRow(
                 "Completed",
@@ -131,6 +157,20 @@ fun BrowseScreen(data: Data, padding: PaddingValues) {
                 trailing = { Count(data.tasks.count { it.done }) },
                 onClick = { nav.push(Page.Completed) },
             )
+        }
+        if (data.settings.karma) {
+            item {
+                ListRow("Productivity", leading = { Icon(Icons.Rounded.Insights, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) }, onClick = { nav.push(Page.Productivity) })
+            }
+        }
+        item {
+            ListRow("Activity", leading = { Icon(Icons.Rounded.History, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) }, onClick = { nav.push(Page.ActivityLog) })
+        }
+        if (data.projects.any { it.archived }) {
+            item {
+                ListRow("Archived projects", leading = { Icon(Icons.Rounded.Archive, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    trailing = { Count(data.projects.count { it.archived }) }, onClick = { nav.push(Page.Archived) })
+            }
         }
         item {
             ListRow(
@@ -141,13 +181,16 @@ fun BrowseScreen(data: Data, padding: PaddingValues) {
         }
     }
     if (newProject) {
+        var fav by remember { mutableStateOf(false) }
         NameDialog(
             title = "New project",
             confirm = "Add",
             colors = ProjectColors.choices,
             initialColor = NewProjectColor,
+            favorite = false,
+            onFavorite = { fav = it },
             onSave = { name, color ->
-                val p = Project(name = name, color = color)
+                val p = Project(name = name, color = color, favorite = fav)
                 Store.saveProject(p)
                 nav.push(Page.ProjectPage(p.id))
             },
@@ -156,52 +199,135 @@ fun BrowseScreen(data: Data, padding: PaddingValues) {
     }
 }
 
-/** Searches task titles, descriptions and labels. */
+/** A project in Browse, indented under its parent, with a menu to move it around. */
 @Composable
-fun SearchPage(data: Data) {
+private fun ProjectRow(p: Project, depth: Int, count: Int) {
     val nav = LocalNav.current
+    var menu by remember { mutableStateOf(false) }
+    Box {
+        ListRow(
+            p.name,
+            modifier = Modifier.padding(start = (depth * 20).dp),
+            leading = { Text("#", style = MaterialTheme.typography.titleLarge, color = Color(p.color)) },
+            trailing = {
+                if (p.favorite) Icon(Icons.Rounded.Star, "Favourite", Modifier.size(16.dp).padding(end = 2.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Count(count)
+            },
+            onClick = { nav.push(Page.ProjectPage(p.id)) },
+            onLongClick = { menu = true },
+        )
+        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+            DropdownMenuItem(text = { Text("Move up") }, onClick = { menu = false; Store.moveProject(p.id, -1) })
+            DropdownMenuItem(text = { Text("Move down") }, onClick = { menu = false; Store.moveProject(p.id, 1) })
+            DropdownMenuItem(text = { Text(if (p.favorite) "Remove from favourites" else "Add to favourites") }, onClick = { menu = false; Store.saveProject(p.copy(favorite = !p.favorite)) })
+            DropdownMenuItem(text = { Text("Archive") }, onClick = { menu = false; Store.archiveProject(p.id, true) })
+        }
+    }
+}
+
+/** Archived projects: bring them back, or delete them for good. */
+@Composable
+fun ArchivedPage(data: Data) {
+    val nav = LocalNav.current
+    var deleting by remember { mutableStateOf<Project?>(null) }
+    Column(Modifier.fillMaxSize().statusBarsPadding()) {
+        PageBar("Archived projects", onBack = { nav.pop() })
+        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 32.dp)) {
+            val archived = data.projects.filter { it.archived }.sortedBy { it.name.lowercase() }
+            if (archived.isEmpty()) item { EmptyState(Icons.Rounded.Archive, "Nothing archived", "Archived projects are kept here, out of the way.") }
+            items(archived, key = { it.id }) { p ->
+                ListRow(
+                    p.name,
+                    leading = { Text("#", style = MaterialTheme.typography.titleLarge, color = Color(p.color)) },
+                    detail = "${data.tasks.count { it.projectId == p.id && !it.done }} open tasks",
+                    trailing = {
+                        IconButton(onClick = { Store.archiveProject(p.id, false) }, Modifier.semantics { contentDescription = "Unarchive ${p.name}" }) { Icon(Icons.Rounded.Unarchive, null) }
+                        IconButton(onClick = { deleting = p }, Modifier.semantics { contentDescription = "Delete ${p.name}" }) { Icon(Icons.Rounded.Close, null, tint = MaterialTheme.colorScheme.error) }
+                    },
+                    onClick = { nav.push(Page.ProjectPage(p.id)) },
+                )
+            }
+        }
+    }
+    deleting?.let { p ->
+        ConfirmDialog("Delete project?", "“${p.name}” and its tasks are deleted for good.", "Delete", onConfirm = { Store.deleteProject(p.id) }, onDismiss = { deleting = null })
+    }
+}
+
+/** Searches task titles, descriptions, comments and labels; a query in filter language shows filter results too. */
+@Composable
+fun SearchScreen(data: Data, padding: PaddingValues) {
+    val nav = LocalNav.current
+    val today = LocalClock.current.today
     var query by remember { mutableStateOf(TextFieldValue("")) }
+    var saving by remember { mutableStateOf(false) }
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
     val q = query.text.trim()
     val tasks = if (q.isEmpty()) emptyList() else data.tasks.filter { t ->
-        t.title.contains(q, true) || t.description.contains(q, true) || t.labels.any { it.contains(q.removePrefix("@"), true) }
+        t.title.contains(q, true) || t.description.contains(q, true) || t.comments.any { it.text.contains(q, true) } ||
+            t.labels.any { it.contains(q.removePrefix("@"), true) }
     }.sortedWith(compareBy<io.github.akrishna87.doable.model.Task>({ it.done }).then(Dates.taskOrder))
-    Column(Modifier.fillMaxSize().statusBarsPadding().imePadding()) {
-        run {
-            PageBar(onBack = { nav.pop() }, leading = {
-                Icon(Icons.Rounded.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                PlainField(
-                    value = query,
-                    onChange = { query = it },
-                    placeholder = "Search tasks",
-                    description = "Search",
-                    style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.weight(10f).padding(start = 12.dp).focusRequester(focus),
-                    singleLine = true,
-                )
-            }) {
-                if (query.text.isNotEmpty()) {
-                    IconButton(onClick = { query = TextFieldValue("") }, Modifier.semantics { contentDescription = "Clear search" }) { Icon(Icons.Rounded.Close, null) }
-                }
+    // Only worth showing when the words look like filter language.
+    val asFilter = if (q.isEmpty() || !Regex("[&|!#@/()]|^p[1-4]$|today|overdue|days?\\b|no date|:").containsMatchIn(q)) null
+    else Filters.run(q, data, today, Dates.weekStart(data.settings)).getOrNull()
+    val projects = if (q.isEmpty()) emptyList() else data.projects.filter { it.name.contains(q, true) }
+    Column(Modifier.fillMaxSize().padding(top = padding.calculateTopPadding()).imePadding()) {
+        Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 12.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Rounded.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            PlainField(
+                value = query,
+                onChange = { query = it },
+                placeholder = "Tasks, projects, or a filter like p1 & today",
+                description = "Search",
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.weight(1f).padding(start = 12.dp).focusRequester(focus),
+                singleLine = true,
+            )
+            if (query.text.isNotEmpty()) {
+                IconButton(onClick = { query = TextFieldValue("") }, Modifier.semantics { contentDescription = "Clear search" }) { Icon(Icons.Rounded.Close, null) }
             }
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 32.dp)) {
+        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = padding.calculateBottomPadding() + 32.dp)) {
             if (q.isEmpty()) {
-                item { EmptyState(Icons.Rounded.Search, "Search your tasks", "Find tasks by title, description or @label.") }
-            } else if (tasks.isEmpty()) {
+                item {
+                    EmptyState(
+                        Icons.Rounded.Search, "Search everything",
+                        "Find tasks by title, description, comment or @label. Filter language works too: try “today | overdue” or “#Work & p1”.",
+                    )
+                }
+            } else if (tasks.isEmpty() && projects.isEmpty() && asFilter.isNullOrEmpty()) {
                 item { EmptyState(Icons.Rounded.Search, "No results", "Nothing matches “$q”.") }
+            }
+            if (projects.isNotEmpty()) {
+                item { SectionHeader("Projects · ${projects.size}") }
+                items(projects, key = { "p-" + it.id }) { p ->
+                    ListRow(p.name, leading = { Text("#", style = MaterialTheme.typography.titleLarge, color = Color(p.color)) }, onClick = { nav.push(Page.ProjectPage(p.id)) })
+                }
             }
             if (tasks.isNotEmpty()) {
                 item { SectionHeader("Tasks · ${tasks.size}") }
                 items(tasks, key = { "t-" + it.id }) { t -> TaskRow(t, data) { nav.push(Page.TaskPage(t.id)) } }
             }
+            if (!asFilter.isNullOrEmpty()) {
+                item {
+                    SectionHeader("As a filter") {
+                        TextButton(onClick = { saving = true }) { Text("Save filter") }
+                    }
+                }
+                for ((gi, g) in asFilter.withIndex()) {
+                    if (asFilter.size > 1) item(key = "fq-$gi") { Text(g.first, Modifier.padding(start = 20.dp, top = 8.dp), style = MaterialTheme.typography.labelLarge) }
+                    items(g.second, key = { "f-$gi-" + it.id }) { t -> TaskRow(t, data) { nav.push(Page.TaskPage(t.id)) } }
+                }
+            }
         }
     }
+    if (saving) FilterDialog(null, onDismiss = { saving = false }, initialQuery = q)
 }
 
-/** Theme, week start, reminders, backups and the version. */
+/** Theme and colours, start page, dates, swipes, reminders, productivity goals, backups and the version. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun SettingsPage(data: Data) {
     val nav = LocalNav.current
@@ -210,6 +336,13 @@ fun SettingsPage(data: Data) {
     val s = data.settings
     var refresh by remember { mutableIntStateOf(0) }
     var restoring by remember { mutableStateOf<Data?>(null) }
+    var startMenu by remember { mutableStateOf(false) }
+    var reminderMenu by remember { mutableStateOf(false) }
+    var pickingSummary by remember { mutableStateOf(false) }
+    var goalMenu by remember { mutableStateOf(false) }
+    var weekGoalMenu by remember { mutableStateOf(false) }
+    var rightMenu by remember { mutableStateOf(false) }
+    var leftMenu by remember { mutableStateOf(false) }
     val canNotify = remember(refresh) { Reminders.canNotify(context) }
     val canExact = remember(refresh) { Reminders.canScheduleExact(context) }
     androidx.lifecycle.compose.LifecycleResumeEffect(Unit) {
@@ -227,6 +360,29 @@ fun SettingsPage(data: Data) {
             if (d == null) actions.message("That file isn't a Doable backup") else restoring = d
         }
     }
+    val csvImporter = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            val result = runCatching {
+                val text = context.contentResolver.openInputStream(uri)!!.use { it.readBytes().decodeToString() }
+                val name = uri.lastPathSegment?.substringAfterLast('/')?.substringBeforeLast('.')?.ifBlank { null } ?: "Imported"
+                Csv.import(text, name, LocalDate.now(), Dates.weekStart(Store.data.value.settings))
+            }
+            result.onSuccess { r ->
+                Store.import(r)
+                actions.message("Imported ${r.tasks.size} tasks into “${r.project.name}”")
+                nav.push(Page.ProjectPage(r.project.id))
+            }.onFailure { actions.message(it.message ?: "Couldn't read that file") }
+        }
+    }
+    fun startLabel(start: String): String = when {
+        start == "today" -> "Today"
+        start == "upcoming" -> "Upcoming"
+        start == "inbox" -> "Inbox"
+        start.startsWith("project:") -> data.projects.firstOrNull { it.id == start.removePrefix("project:") }?.name ?: "Today"
+        start.startsWith("filter:") -> data.filter(start.removePrefix("filter:"))?.name ?: "Today"
+        start.startsWith("label:") -> "@" + start.removePrefix("label:")
+        else -> "Today"
+    }
 
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
         PageBar("Settings", onBack = { nav.pop() })
@@ -240,7 +396,36 @@ fun SettingsPage(data: Data) {
                     modifier = Modifier.semantics { contentDescription = "Theme: ${mode.label}" },
                 )
             }
-            item { SectionHeader("Calendar") }
+            item {
+                Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
+                    Text("Colour", style = MaterialTheme.typography.labelLarge)
+                    androidx.compose.foundation.layout.FlowRow(Modifier.padding(top = 8.dp), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp), verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp)) {
+                        for (a in Accent.entries) {
+                            Column(
+                                Modifier.clip(MaterialTheme.shapes.small).clickable { Store.updateSettings { it.copy(accent = a) } }
+                                    .semantics { contentDescription = "Colour: ${a.label}" }.padding(4.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                Box(Modifier.size(36.dp).clip(CircleShape).background(Color(a.light)), contentAlignment = Alignment.Center) {
+                                    if (a == s.accent) Icon(Icons.Rounded.CheckCircle, null, tint = Color.White)
+                                }
+                                Text(a.label, style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                    }
+                }
+            }
+
+            item { SectionHeader("General") }
+            item {
+                Box {
+                    ListRow("Start page", detail = startLabel(s.startPage), onClick = { startMenu = true })
+                    DropdownMenu(expanded = startMenu, onDismissRequest = { startMenu = false }) {
+                        val choices = listOf("today", "upcoming", "inbox") + data.filters.map { "filter:${it.id}" } + data.projectTree().map { "project:${it.first.id}" }
+                        for (c in choices) DropdownMenuItem(text = { Text(startLabel(c)) }, onClick = { startMenu = false; Store.updateSettings { it.copy(startPage = c) } })
+                    }
+                }
+            }
             item {
                 ListRow(
                     "Week starts on Sunday",
@@ -248,13 +433,57 @@ fun SettingsPage(data: Data) {
                     onClick = { Store.updateSettings { it.copy(weekStartsSunday = !it.weekStartsSunday) } },
                 )
             }
+            item {
+                ListRow(
+                    "Smart date recognition",
+                    detail = "Read dates, #projects and @labels typed into a task",
+                    trailing = { Switch(checked = s.smartDates, onCheckedChange = { on -> Store.updateSettings { it.copy(smartDates = on) } }) },
+                    onClick = { Store.updateSettings { it.copy(smartDates = !it.smartDates) } },
+                )
+            }
+            item {
+                Box {
+                    ListRow("Swipe right", detail = s.swipeRight.label, onClick = { rightMenu = true })
+                    DropdownMenu(expanded = rightMenu, onDismissRequest = { rightMenu = false }) {
+                        for (a in SwipeAction.entries) DropdownMenuItem(text = { Text(a.label) }, onClick = { rightMenu = false; Store.updateSettings { it.copy(swipeRight = a) } })
+                    }
+                }
+            }
+            item {
+                Box {
+                    ListRow("Swipe left", detail = s.swipeLeft.label, onClick = { leftMenu = true })
+                    DropdownMenu(expanded = leftMenu, onDismissRequest = { leftMenu = false }) {
+                        for (a in SwipeAction.entries) DropdownMenuItem(text = { Text(a.label) }, onClick = { leftMenu = false; Store.updateSettings { it.copy(swipeLeft = a) } })
+                    }
+                }
+            }
+
             item { SectionHeader("Reminders") }
             item {
                 ListRow(
-                    "Remind me when tasks are due",
-                    detail = "For tasks with a time",
+                    "Reminders",
+                    detail = "Notifications at the times you set on tasks",
                     trailing = { Switch(checked = s.reminders, onCheckedChange = { on -> Store.updateSettings { it.copy(reminders = on) } }) },
                     onClick = { Store.updateSettings { it.copy(reminders = !it.reminders) } },
+                )
+            }
+            item {
+                Box {
+                    ListRow("Automatic reminder", detail = (s.autoReminder?.let { Reminder(minutesBefore = it).label() } ?: "None") + " · for tasks given a time", onClick = { reminderMenu = true })
+                    DropdownMenu(expanded = reminderMenu, onDismissRequest = { reminderMenu = false }) {
+                        DropdownMenuItem(text = { Text("None") }, onClick = { reminderMenu = false; Store.updateSettings { it.copy(autoReminder = null) } })
+                        for (m in Reminder.presets) DropdownMenuItem(text = { Text(Reminder(minutesBefore = m).label()) }, onClick = { reminderMenu = false; Store.updateSettings { it.copy(autoReminder = m) } })
+                    }
+                }
+            }
+            item {
+                ListRow(
+                    "Daily summary",
+                    detail = s.dailySummary?.let { "Each day at " + Dates.timeFormatter(LocalClock.current.is24Hour).format(it) } ?: "Off · a morning list of the day's tasks",
+                    trailing = {
+                        Switch(checked = s.dailySummary != null, onCheckedChange = { on -> Store.updateSettings { it.copy(dailySummary = if (on) LocalTime.of(8, 0) else null) } })
+                    },
+                    onClick = { pickingSummary = true },
                 )
             }
             if (s.reminders && !canNotify) {
@@ -290,7 +519,62 @@ fun SettingsPage(data: Data) {
                     )
                 }
             }
-            item { SectionHeader("Backup") }
+
+            item { SectionHeader("Productivity") }
+            item {
+                ListRow(
+                    "Karma",
+                    detail = "Points, goals and streaks for completing tasks",
+                    trailing = { Switch(checked = s.karma, onCheckedChange = { on -> Store.updateSettings { it.copy(karma = on) } }) },
+                    onClick = { Store.updateSettings { it.copy(karma = !it.karma) } },
+                )
+            }
+            if (s.karma) {
+                item {
+                    Box {
+                        ListRow("Daily goal", detail = "${s.dailyGoal} tasks", onClick = { goalMenu = true })
+                        DropdownMenu(expanded = goalMenu, onDismissRequest = { goalMenu = false }) {
+                            for (n in listOf(1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20)) DropdownMenuItem(text = { Text("$n tasks") }, onClick = { goalMenu = false; Store.updateSettings { it.copy(dailyGoal = n) } })
+                        }
+                    }
+                }
+                item {
+                    Box {
+                        ListRow("Weekly goal", detail = "${s.weeklyGoal} tasks", onClick = { weekGoalMenu = true })
+                        DropdownMenu(expanded = weekGoalMenu, onDismissRequest = { weekGoalMenu = false }) {
+                            for (n in listOf(5, 10, 15, 20, 25, 30, 40, 50, 75, 100)) DropdownMenuItem(text = { Text("$n tasks") }, onClick = { weekGoalMenu = false; Store.updateSettings { it.copy(weeklyGoal = n) } })
+                        }
+                    }
+                }
+                item {
+                    Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
+                        Text("Days off", style = MaterialTheme.typography.bodyLarge)
+                        Text("Streaks don't break on these days", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Row(Modifier.padding(top = 4.dp)) {
+                            for (d in DayOfWeek.entries) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
+                                    Checkbox(
+                                        checked = d in s.daysOff,
+                                        onCheckedChange = { on -> Store.updateSettings { it.copy(daysOff = if (on) it.daysOff + d else it.daysOff - d) } },
+                                        modifier = Modifier.semantics { contentDescription = "Day off: " + d.getDisplayName(TextStyle.FULL, Locale.getDefault()) },
+                                    )
+                                    Text(d.getDisplayName(TextStyle.NARROW, Locale.getDefault()), style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                        }
+                    }
+                }
+                item {
+                    ListRow(
+                        "Vacation mode",
+                        detail = "Pause goals and streaks",
+                        trailing = { Switch(checked = s.vacation, onCheckedChange = { on -> Store.updateSettings { it.copy(vacation = on) } }) },
+                        onClick = { Store.updateSettings { it.copy(vacation = !it.vacation) } },
+                    )
+                }
+            }
+
+            item { SectionHeader("Backup and import") }
             item {
                 ListRow(
                     "Export backup",
@@ -305,6 +589,14 @@ fun SettingsPage(data: Data) {
                     onClick = { importer.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) },
                 )
             }
+            item {
+                ListRow(
+                    "Import a Todoist template (CSV)",
+                    leading = { Icon(Icons.Rounded.UploadFile, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    detail = "Adds it as a new project",
+                    onClick = { csvImporter.launch(arrayOf("text/csv", "text/comma-separated-values", "text/plain", "application/octet-stream", "*/*")) },
+                )
+            }
             item { SectionHeader("About") }
             item {
                 val version = remember {
@@ -313,6 +605,9 @@ fun SettingsPage(data: Data) {
                 ListRow("Doable", detail = "Version $version · Your tasks, on your phone only")
             }
         }
+    }
+    if (pickingSummary) {
+        TimePickDialog(s.dailySummary ?: LocalTime.of(8, 0), LocalClock.current.is24Hour, onPick = { t -> Store.updateSettings { it.copy(dailySummary = t) } }, onDismiss = { pickingSummary = false })
     }
     restoring?.let { backup ->
         ConfirmDialog(

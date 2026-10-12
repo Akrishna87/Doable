@@ -2,7 +2,8 @@ package io.github.akrishna87.doable
 
 import io.github.akrishna87.doable.model.Dates
 import io.github.akrishna87.doable.model.DueTone
-import io.github.akrishna87.doable.model.Repeat
+import io.github.akrishna87.doable.model.Reminder
+import io.github.akrishna87.doable.model.RepeatRule
 import io.github.akrishna87.doable.model.Task
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -52,14 +53,14 @@ class DatesTest {
 
     @Test
     fun repeatingTasksMoveOn() {
-        assertEquals(today.plusDays(1), Dates.nextDue(today, Repeat.DAILY, today))
+        assertEquals(today.plusDays(1), RepeatRule.Daily.next(today, today))
         // An overdue daily task comes back today, not in the past.
-        assertEquals(today, Dates.nextDue(today.minusDays(3), Repeat.DAILY, today))
+        assertEquals(today, RepeatRule.Daily.next(today.minusDays(3), today))
         // Friday's weekday task skips the weekend.
-        assertEquals(LocalDate.of(2026, 10, 5), Dates.nextDue(LocalDate.of(2026, 10, 2), Repeat.WEEKDAYS, LocalDate.of(2026, 10, 2)))
-        assertEquals(today.plusWeeks(1), Dates.nextDue(today, Repeat.WEEKLY, today))
-        assertEquals(LocalDate.of(2026, 2, 28), Dates.nextDue(LocalDate.of(2026, 1, 31), Repeat.MONTHLY, LocalDate.of(2026, 1, 31)))
-        assertEquals(LocalDate.of(2027, 10, 3), Dates.nextDue(today, Repeat.YEARLY, today))
+        assertEquals(LocalDate.of(2026, 10, 5), RepeatRule.Weekdays.next(LocalDate.of(2026, 10, 2), LocalDate.of(2026, 10, 2)))
+        assertEquals(today.plusWeeks(1), RepeatRule.Weekly.next(today, today))
+        assertEquals(LocalDate.of(2026, 2, 28), RepeatRule.Monthly.next(LocalDate.of(2026, 1, 31), LocalDate.of(2026, 1, 31)))
+        assertEquals(LocalDate.of(2027, 10, 3), RepeatRule.Yearly.next(today, today))
     }
 
     @Test
@@ -84,9 +85,17 @@ class DatesTest {
 
     @Test
     fun reminders() {
-        assertEquals(LocalDateTime.of(today, LocalTime.of(9, 0)), Dates.reminderAt(Task(title = "x", due = today, time = LocalTime.of(9, 0))))
-        assertNull(Dates.reminderAt(Task(title = "x", due = today)))
-        assertNull(Dates.reminderAt(Task(title = "x", due = today, time = LocalTime.of(9, 0), reminder = false)))
-        assertNull(Dates.reminderAt(Task(title = "x", due = today, time = LocalTime.of(9, 0), done = true)))
+        val nine = LocalTime.of(9, 0)
+        val atDue = Reminder(id = "a", minutesBefore = 0)
+        val early = Reminder(id = "b", minutesBefore = 30)
+        val fixed = Reminder(id = "c", at = LocalDateTime.of(today.minusDays(1), LocalTime.of(20, 0)))
+        val task = Task(title = "x", due = today, time = nine, reminders = listOf(atDue, early, fixed))
+        assertEquals(
+            listOf("a" to LocalDateTime.of(today, nine), "b" to LocalDateTime.of(today, LocalTime.of(8, 30)), "c" to LocalDateTime.of(today.minusDays(1), LocalTime.of(20, 0))),
+            Dates.reminderTimes(task),
+        )
+        // Without a time, only the fixed one can go off; a finished task has none.
+        assertEquals(listOf("c"), Dates.reminderTimes(task.copy(time = null)).map { it.first })
+        assertEquals(emptyList<Pair<String, LocalDateTime>>(), Dates.reminderTimes(task.copy(done = true)))
     }
 }

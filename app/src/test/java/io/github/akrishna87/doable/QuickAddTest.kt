@@ -2,7 +2,8 @@ package io.github.akrishna87.doable
 
 import io.github.akrishna87.doable.model.Project
 import io.github.akrishna87.doable.model.QuickAdd
-import io.github.akrishna87.doable.model.Repeat
+import io.github.akrishna87.doable.model.Freq
+import io.github.akrishna87.doable.model.RepeatRule
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -26,7 +27,7 @@ class QuickAddTest {
         assertEquals(1, p.priority)
         assertEquals("home", p.projectId)
         assertEquals(listOf("bills"), p.labels)
-        assertEquals(Repeat.MONTHLY, p.repeat)
+        assertEquals(RepeatRule.Monthly, p.repeat)
     }
 
     @Test
@@ -102,14 +103,14 @@ class QuickAddTest {
 
     @Test
     fun repeats() {
-        assertEquals(Repeat.DAILY, parse("Stretch every day").repeat)
+        assertEquals(RepeatRule.Daily, parse("Stretch every day").repeat)
         assertEquals(today, parse("Stretch every day").due)
-        assertEquals(Repeat.WEEKLY, parse("Bins every thursday").repeat)
+        assertEquals(RepeatRule(Freq.WEEKLY, weekdays = setOf(java.time.DayOfWeek.THURSDAY)), parse("Bins every thursday").repeat)
         assertEquals(LocalDate.of(2026, 10, 8), parse("Bins every thursday").due)
-        assertEquals(Repeat.WEEKDAYS, parse("Standup every weekday 9:15am").repeat)
+        assertEquals(RepeatRule.Weekdays, parse("Standup every weekday 9:15am").repeat)
         // On a Saturday, "every weekday" starts on Monday.
         assertEquals(LocalDate.of(2026, 10, 5), parse("Standup every weekday").due)
-        assertEquals(Repeat.YEARLY, parse("Renew passport yearly").repeat)
+        assertEquals(RepeatRule.Yearly, parse("Renew passport yearly").repeat)
     }
 
     @Test

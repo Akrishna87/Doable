@@ -31,6 +31,9 @@ import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.ArrowDropDown
 import androidx.compose.material.icons.rounded.CalendarToday
 import androidx.compose.material.icons.rounded.Flag
+import androidx.compose.material.icons.rounded.HourglassBottom
+import androidx.compose.material.icons.rounded.Notifications
+import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material.icons.rounded.Label
 import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.Schedule
@@ -73,7 +76,8 @@ import io.github.akrishna87.doable.model.Data
 import io.github.akrishna87.doable.model.Dates
 import io.github.akrishna87.doable.model.Priority
 import io.github.akrishna87.doable.model.QuickAdd
-import io.github.akrishna87.doable.model.Repeat
+import io.github.akrishna87.doable.model.ParsedTask
+import io.github.akrishna87.doable.model.RepeatRule
 import io.github.akrishna87.doable.model.Task
 import kotlinx.coroutines.delay
 import java.time.LocalDate
@@ -92,14 +96,19 @@ fun QuickAddPanel(defaults: QuickAddDefaults, data: Data, onClose: () -> Unit) {
     val extra = LocalExtra.current
     val ask = LocalAskNotifications.current
 
-    var text by remember { mutableStateOf(TextFieldValue("")) }
+    var text by remember { mutableStateOf(TextFieldValue(defaults.text, androidx.compose.ui.text.TextRange(defaults.text.length))) }
     var description by remember { mutableStateOf(TextFieldValue("")) }
     var due by remember { mutableStateOf(defaults.due) }
     var time by remember { mutableStateOf<LocalTime?>(null) }
     var priority by remember { mutableIntStateOf(Priority.NONE) }
     var projectId by remember { mutableStateOf(data.task(defaults.parentId)?.projectId ?: defaults.projectId) }
     var labels by remember { mutableStateOf(defaults.labels) }
-    var repeat by remember { mutableStateOf(Repeat.NONE) }
+    var repeat by remember { mutableStateOf<RepeatRule?>(null) }
+    var sectionId by remember { mutableStateOf(data.task(defaults.parentId)?.sectionId ?: defaults.sectionId) }
+    var deadline by remember { mutableStateOf<LocalDate?>(null) }
+    var deadlineMenu by remember { mutableStateOf(false) }
+    var pickingDeadline by remember { mutableStateOf(false) }
+    var customRepeat by remember { mutableStateOf(false) }
     var added by remember { mutableStateOf<String?>(null) }
 
     var dueMenu by remember { mutableStateOf(false) }
@@ -110,8 +119,9 @@ fun QuickAddPanel(defaults: QuickAddDefaults, data: Data, onClose: () -> Unit) {
     var repeatMenu by remember { mutableStateOf(false) }
     var labelsDialog by remember { mutableStateOf(false) }
 
-    val parsed = remember(text.text, data.projects, today) {
-        QuickAdd.parse(text.text, today, LocalTime.now(), data.projects, Dates.weekStart(data.settings))
+    val parsed = remember(text.text, data.projects, data.sections, today, data.settings.smartDates) {
+        if (data.settings.smartDates) QuickAdd.parse(text.text, today, LocalTime.now(), data.projects, Dates.weekStart(data.settings), data.sections)
+        else ParsedTask(text.text.trim())
     }
     // What the text says wins over the chips.
     val effDue = parsed.due ?: due
@@ -119,7 +129,9 @@ fun QuickAddPanel(defaults: QuickAddDefaults, data: Data, onClose: () -> Unit) {
     val effPriority = parsed.priority ?: priority
     val effProject = parsed.projectId ?: projectId
     val effLabels = (labels + parsed.labels).distinctBy { it.lowercase() }
-    val effRepeat = if (effDue == null) Repeat.NONE else parsed.repeat ?: repeat
+    val effRepeat = if (effDue == null) null else parsed.repeat ?: repeat
+    val effSection = parsed.sectionId ?: sectionId?.takeIf { s -> data.section(s)?.projectId == effProject }
+    val effDeadline = parsed.deadline ?: deadline
 
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
@@ -144,9 +156,13 @@ fun QuickAddPanel(defaults: QuickAddDefaults, data: Data, onClose: () -> Unit) {
             time = effTime,
             repeat = effRepeat,
             parentId = defaults.parentId,
+            sectionId = effSection,
+            deadline = effDeadline,
+            duration = if (effTime != null) parsed.duration else null,
+            reminders = parsed.reminders,
         )
         Store.saveTask(t)
-        if (t.time != null) ask()
+        if (t.time != null || t.reminders.isNotEmpty()) ask()
         added = t.title
         text = TextFieldValue("")
         description = TextFieldValue("")
@@ -210,8 +226,8 @@ fun QuickAddPanel(defaults: QuickAddDefaults, data: Data, onClose: () -> Unit) {
                     if (effDue != null) {
                         QuickChip(Icons.Rounded.Schedule, effTime?.let { Dates.timeFormatter(clock.is24Hour).format(it) } ?: "Time", null) { pickingTime = true }
                         Box {
-                            QuickChip(Icons.Rounded.Repeat, if (effRepeat == Repeat.NONE) "Repeat" else effRepeat.label, null) { repeatMenu = true }
-                            RepeatMenu(repeatMenu, effRepeat, { repeatMenu = false }) { repeat = it }
+                            QuickChip(Icons.Rounded.Repeat, effRepeat?.label() ?: "Repeat", null) { repeatMenu = true }
+                            RepeatMenu(repeatMenu, effRepeat, { repeatMenu = false }, onCustom = { customRepeat = true }) { repeat = it }
                         }
                     }
                     Box {
@@ -223,26 +239,42 @@ fun QuickAddPanel(defaults: QuickAddDefaults, data: Data, onClose: () -> Unit) {
                         PriorityMenu(priorityMenu, effPriority, { priorityMenu = false }) { priority = it }
                     }
                     QuickChip(Icons.Rounded.Label, if (effLabels.isEmpty()) "Labels" else effLabels.joinToString(" ") { "@$it" }, null) { labelsDialog = true }
+                    Box {
+                        QuickChip(
+                            Icons.Rounded.HourglassBottom,
+                            effDeadline?.let { "Deadline " + Dates.dayLabel(it, today) } ?: "Deadline",
+                            if (effDeadline != null) extra.overdue else null,
+                        ) { deadlineMenu = true }
+                        DueMenu(deadlineMenu, { deadlineMenu = false }, today, Dates.weekStart(data.settings), onPick = { deadline = it }, onPickDate = { pickingDeadline = true })
+                    }
+                    if (parsed.reminders.isNotEmpty()) QuickChip(Icons.Rounded.Notifications, if (parsed.reminders.size == 1) "1 reminder" else "${parsed.reminders.size} reminders", null) {}
+                    if (parsed.duration != null && effTime != null) QuickChip(Icons.Rounded.Timer, Dates.durationLabel(parsed.duration), null) {}
                 }
 
                 HorizontalDivider(Modifier.padding(top = 12.dp, bottom = 4.dp), color = MaterialTheme.colorScheme.outlineVariant)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box {
                         val project = data.project(effProject)
+                        val section = data.section(effSection)
                         Row(
                             Modifier
                                 .clip(RoundedCornerShape(8.dp))
                                 .clickable(enabled = defaults.parentId == null) { projectMenu = true }
-                                .semantics { contentDescription = "Project: ${project.name}" }
+                                .semantics { contentDescription = "Project: ${project.name}" + (section?.let { " / ${it.name}" } ?: "") }
                                 .padding(horizontal = 8.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             ColorDot(project.color)
                             Spacer(Modifier.width(8.dp))
-                            Text(project.name, style = MaterialTheme.typography.labelLarge)
+                            Text(project.name + (section?.let { " / ${it.name}" } ?: ""), style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Icon(Icons.Rounded.ArrowDropDown, null)
                         }
-                        ProjectMenu(projectMenu, data.allProjects, effProject, { projectMenu = false }) { projectId = it }
+                        if (projectMenu) {
+                            MoveDialog(Task(title = "", projectId = effProject, sectionId = effSection), data, onDismiss = { projectMenu = false }) { p, sec ->
+                                projectId = p
+                                sectionId = sec
+                            }
+                        }
                     }
                     Spacer(Modifier.weight(1f))
                     val last = added
@@ -269,6 +301,8 @@ fun QuickAddPanel(defaults: QuickAddDefaults, data: Data, onClose: () -> Unit) {
         TimePickDialog(effTime ?: Dates.nextHour(LocalDateTime.now().toLocalTime()), clock.is24Hour, onPick = { time = it }, onDismiss = { pickingTime = false })
     }
     if (labelsDialog) LabelsDialog(data.labels, labels, onDone = { labels = it }, onDismiss = { labelsDialog = false })
+    if (pickingDeadline) DatePickDialog(effDeadline ?: effDue, onPick = { deadline = it }, onDismiss = { pickingDeadline = false })
+    if (customRepeat) RepeatDialog(effRepeat, effDue, onDone = { repeat = it; if (effDue == null) due = it.firstOnOrAfter(today) }, onDismiss = { customRepeat = false })
 }
 
 @Composable

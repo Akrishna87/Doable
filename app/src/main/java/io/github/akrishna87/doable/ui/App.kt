@@ -22,10 +22,10 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.GridView
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Today
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
@@ -67,6 +67,7 @@ import io.github.akrishna87.doable.Store
 import io.github.akrishna87.doable.model.Data
 import io.github.akrishna87.doable.model.Dates
 import io.github.akrishna87.doable.model.INBOX_ID
+import io.github.akrishna87.doable.model.SwipeAction
 import io.github.akrishna87.doable.model.Task
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
@@ -77,6 +78,7 @@ import java.time.LocalDateTime
 enum class Tab(val label: String, val icon: ImageVector) {
     TODAY("Today", Icons.Rounded.Today),
     UPCOMING("Upcoming", Icons.Rounded.CalendarMonth),
+    SEARCH("Search", Icons.Rounded.Search),
     BROWSE("Browse", Icons.Rounded.GridView),
 }
 
@@ -84,24 +86,37 @@ enum class Tab(val label: String, val icon: ImageVector) {
 sealed interface Page {
     data class ProjectPage(val id: String) : Page
     data class LabelPage(val name: String) : Page
+    data class FilterPage(val id: String) : Page
     data class TaskPage(val id: String) : Page
     data object Completed : Page
     data object SettingsPage : Page
-    data object Search : Page
+    data object FiltersLabels : Page
+    data object Productivity : Page
+    data object ActivityLog : Page
+    data object Archived : Page
 }
 
 /** What a new task starts with, depending on where Quick Add was opened. */
 data class QuickAddDefaults(
     val due: LocalDate? = null,
     val projectId: String = INBOX_ID,
+    val sectionId: String? = null,
     val labels: List<String> = emptyList(),
     val parentId: String? = null,
+    /** Text to start with, for a task shared from another app. */
+    val text: String = "",
 )
 
 class Nav {
     var tab by mutableStateOf(Tab.TODAY)
     val pages = mutableStateListOf<Page>()
     var quickAdd by mutableStateOf<QuickAddDefaults?>(null)
+
+    /** A task whose date is being picked (from a swipe or a menu). */
+    var scheduling by mutableStateOf<Task?>(null)
+
+    /** A task being moved to another project or section. */
+    var moving by mutableStateOf<Task?>(null)
 
     fun push(page: Page) {
         pages.add(page)
@@ -110,6 +125,21 @@ class Nav {
     fun pop() {
         if (pages.isNotEmpty()) pages.removeAt(pages.lastIndex)
     }
+
+    /** Opens what Settings → Start page names: a tab, or a project, label or filter on top of Today. */
+    fun open(start: String, data: Data) {
+        pages.clear()
+        when {
+            start == "upcoming" -> tab = Tab.UPCOMING
+            start == "search" -> tab = Tab.SEARCH
+            start == "browse" -> tab = Tab.BROWSE
+            start == "inbox" -> { tab = Tab.TODAY; push(Page.ProjectPage(INBOX_ID)) }
+            start.startsWith("project:") && data.projects.any { it.id == start.removePrefix("project:") } -> { tab = Tab.BROWSE; push(Page.ProjectPage(start.removePrefix("project:"))) }
+            start.startsWith("filter:") && data.filter(start.removePrefix("filter:")) != null -> { tab = Tab.BROWSE; push(Page.FilterPage(start.removePrefix("filter:"))) }
+            start.startsWith("label:") -> { tab = Tab.BROWSE; push(Page.LabelPage(start.removePrefix("label:"))) }
+            else -> tab = Tab.TODAY
+        }
+    }
 }
 
 val LocalNav = staticCompositionLocalOf<Nav> { error("No Nav") }
@@ -117,8 +147,8 @@ val LocalNav = staticCompositionLocalOf<Nav> { error("No Nav") }
 /** Asks once for permission to post notifications, the first time a task gets a reminder. */
 val LocalAskNotifications = staticCompositionLocalOf<() -> Unit> { {} }
 
-/** Completing and deleting tasks, with Undo in a snackbar. */
-class TaskActions(private val scope: CoroutineScope, private val snackbar: SnackbarHostState) {
+/** Completing, scheduling and deleting tasks, with Undo in a snackbar. */
+class TaskActions(private val scope: CoroutineScope, private val snackbar: SnackbarHostState, private val nav: Nav) {
     fun toggle(task: Task) {
         if (task.done) Store.uncompleteTask(task.id) else complete(task)
     }
@@ -134,6 +164,19 @@ class TaskActions(private val scope: CoroutineScope, private val snackbar: Snack
         val before = Store.taskFamily(task.id)
         Store.deleteTask(task.id)
         offerUndo("Task deleted") { Store.restoreTasks(before) }
+    }
+
+    fun schedule(task: Task) {
+        nav.scheduling = task
+    }
+
+    fun swipe(task: Task, action: SwipeAction) {
+        when (action) {
+            SwipeAction.COMPLETE -> toggle(task)
+            SwipeAction.SCHEDULE -> schedule(task)
+            SwipeAction.DELETE -> delete(task)
+            SwipeAction.NONE -> {}
+        }
     }
 
     fun message(text: String) {
@@ -161,16 +204,16 @@ fun DoableApp() {
         val style = if (dark) SystemBarStyle.dark(AndroidColor.TRANSPARENT) else SystemBarStyle.light(AndroidColor.TRANSPARENT, AndroidColor.TRANSPARENT)
         activity?.enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
     }
-    DoableTheme(dark) { AppContent(data) }
+    DoableTheme(dark, data.settings.accent) { AppContent(data) }
 }
 
 @Composable
 private fun AppContent(data: Data) {
     val context = LocalContext.current
-    val nav = remember { Nav() }
+    val nav = remember { Nav().also { it.open(Store.data.value.settings.startPage, Store.data.value) } }
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
-    val actions = remember { TaskActions(scope, snackbar) }
+    val actions = remember { TaskActions(scope, snackbar, nav) }
     val now by produceState(LocalDateTime.now()) {
         while (true) {
             val n = LocalDateTime.now()
@@ -191,8 +234,9 @@ private fun AppContent(data: Data) {
     LaunchedEffect(Unit) {
         MainActivity.launch.collect { request ->
             when (request) {
-                LaunchRequest.QuickAdd -> nav.quickAdd = QuickAddDefaults(due = LocalDate.now())
+                is LaunchRequest.QuickAdd -> nav.quickAdd = QuickAddDefaults(due = if (request.text.isEmpty()) LocalDate.now() else null, text = request.text)
                 is LaunchRequest.OpenTask -> if (Store.data.value.task(request.id) != null) nav.push(Page.TaskPage(request.id))
+                is LaunchRequest.Open -> nav.open(request.page, Store.data.value)
                 null -> {}
             }
             if (request != null) MainActivity.launch.value = null
@@ -214,16 +258,15 @@ private fun AppContent(data: Data) {
                 containerColor = MaterialTheme.colorScheme.surface,
                 bottomBar = { BottomBar(nav.tab) { nav.tab = it } },
                 floatingActionButton = {
-                    val (label, onClick) = when (nav.tab) {
-                        Tab.BROWSE -> "Add task" to { nav.quickAdd = QuickAddDefaults() }
-                        else -> "Add task" to { nav.quickAdd = QuickAddDefaults(due = LocalDate.now()) }
+                    if (nav.tab != Tab.SEARCH) {
+                        Fab("Add task") { nav.quickAdd = QuickAddDefaults(due = if (nav.tab == Tab.BROWSE) null else LocalDate.now()) }
                     }
-                    Fab(label, onClick)
                 },
             ) { padding ->
                 when (nav.tab) {
                     Tab.TODAY -> TodayScreen(data, padding)
                     Tab.UPCOMING -> UpcomingScreen(data, padding)
+                    Tab.SEARCH -> SearchScreen(data, padding)
                     Tab.BROWSE -> BrowseScreen(data, padding)
                 }
             }
@@ -242,6 +285,22 @@ private fun AppContent(data: Data) {
 
             nav.quickAdd?.let { defaults -> QuickAddPanel(defaults, data) { nav.quickAdd = null } }
 
+            nav.scheduling?.let { t ->
+                ScheduleDialog(t, data, onDismiss = { nav.scheduling = null }) { day ->
+                    val before = Store.taskFamily(t.id)
+                    val cur = Store.data.value.task(t.id) ?: return@ScheduleDialog
+                    Store.saveTask(if (day == null) cur.copy(due = null, time = null, repeat = null) else cur.copy(due = day))
+                    actions.offerUndo(if (day == null) "Date removed" else "Scheduled for ${Dates.dayLabel(day, LocalDate.now())}") { Store.restoreTasks(before) }
+                }
+            }
+            nav.moving?.let { t ->
+                MoveDialog(t, data, onDismiss = { nav.moving = null }) { projectId, sectionId ->
+                    val before = Store.taskFamily(t.id)
+                    Store.moveTask(t.id, projectId, sectionId)
+                    actions.offerUndo("Moved to ${data.project(projectId).name}" + (data.section(sectionId)?.let { " / ${it.name}" } ?: "")) { Store.restoreTasks(before) }
+                }
+            }
+
             SnackbarHost(
                 snackbar,
                 Modifier.align(Alignment.BottomCenter).navigationBarsPadding().imePadding().padding(bottom = 72.dp),
@@ -255,10 +314,14 @@ private fun PageContent(page: Page, data: Data) {
     when (page) {
         is Page.ProjectPage -> ProjectPage(page.id, data)
         is Page.LabelPage -> LabelPage(page.name, data)
+        is Page.FilterPage -> FilterPage(page.id, data)
         is Page.TaskPage -> TaskDetailPage(page.id, data)
         Page.Completed -> CompletedPage(data)
         Page.SettingsPage -> SettingsPage(data)
-        Page.Search -> SearchPage(data)
+        Page.FiltersLabels -> FiltersLabelsPage(data)
+        Page.Productivity -> ProductivityPage(data)
+        Page.ActivityLog -> ActivityPage(data)
+        Page.Archived -> ArchivedPage(data)
     }
 }
 

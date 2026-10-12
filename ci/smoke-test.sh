@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Runs inside the Android emulator job: adds tasks with Quick Add, completes one, adds a sub-task
-# and a project, searches, and switches to the dark theme.
+# Runs inside the Android emulator job: adds tasks with Quick Add (dates, priorities, labels and a
+# custom repeat), completes one, adds a sub-task, makes a project with a section and looks at it as a
+# board, opens a saved filter and the productivity page, searches, and switches to the dark theme.
 # Usage: smoke-test.sh <apk> <output dir>
 set -euo pipefail
 
@@ -94,6 +95,12 @@ sleep 1
 adb shell input text "Call%sdentist%stomorrow%s9am"
 adb shell input keyevent KEYCODE_ENTER
 sleep 1
+adb shell input text "Water%splants%stomorrow%severy%s3%sdays"
+sleep 1
+dump quick-repeat
+grep -q 'content-desc="Every 3 days"' "$OUT/quick-repeat.xml" || fail "Quick Add didn't read every 3 days as a repeat"
+adb shell input keyevent KEYCODE_ENTER
+sleep 1
 close_panel
 wait_for today-tasks 'text="Buy milk"' 10 "the new task isn't on Today"
 grep -q 'text="@errands"' "$OUT/today-tasks.xml" || fail "the task's label isn't shown"
@@ -115,7 +122,8 @@ wait_for upcoming 'text="Call dentist"' 10 "tomorrow's task isn't in Upcoming"
 shot 4-upcoming
 tap upcoming "Call dentist"
 wait_for detail 'content-desc="Task options"' 10 "the task didn't open"
-grep -q 'text="Remind me at the due time"' "$OUT/detail.xml" || fail "the 9am task has no reminder switch"
+grep -q 'At the due time' "$OUT/detail.xml" || fail "the 9am task didn't get its automatic reminder"
+grep -q 'text="Deadline"' "$OUT/detail.xml" || fail "the task has no deadline row"
 shot 5-task-detail
 tap detail "Add sub-task"
 wait_for sub-quick 'content-desc="Task name"' 10 "Quick Add didn't open for a sub-task"
@@ -125,12 +133,19 @@ adb shell input keyevent KEYCODE_ENTER
 sleep 1
 close_panel
 wait_for detail-sub 'text="Find insurance card"' 10 "the sub-task wasn't added"
-shot 6-subtask
+tap detail-sub "Comment"
+sleep 1
+adb shell input text "Bring%sthe%sold%sone"
+hide_keyboard
+dump comment-typed
+tap comment-typed "Add comment"
+wait_for commented 'text="Bring the old one"' 10 "the comment wasn't added"
+shot 6-subtask-and-comment
 adb shell input keyevent KEYCODE_BACK
 sleep 1
-echo "PASS: task details and sub-tasks"
+echo "PASS: task details, sub-tasks and comments"
 
-echo "--- Projects"
+echo "--- Projects, sections and the board"
 dump before-browse
 tap before-browse "Browse" last
 wait_for browse 'content-desc="Add project"' 10 "Browse has no Add project button"
@@ -147,22 +162,55 @@ adb shell input keyevent KEYCODE_ENTER
 sleep 1
 close_panel
 wait_for project-task 'text="Write report"' 10 "the task didn't go into the project"
+tap project-task "Project options"
+sleep 1
+dump project-menu
+tap project-menu "Add section"
+sleep 2
+adb shell input text "Doing"
+adb shell input keyevent KEYCODE_ENTER
+wait_for section 'text="Doing"' 10 "the section wasn't added"
 shot 7-project
+tap section "View options"
+sleep 1
+dump view-options
+tap view-options "Board"
+sleep 1
+adb shell input keyevent KEYCODE_BACK
+wait_for board 'content-desc="Add task to Doing"' 10 "the board has no Doing column"
+shot 8-board
 adb shell input keyevent KEYCODE_BACK
 sleep 1
-echo "PASS: projects"
+echo "PASS: projects, sections and board view"
+
+echo "--- Filters and productivity"
+dump before-filters
+tap before-filters "Filters & Labels"
+wait_for filters 'text="Next 7 days"' 10 "the starter filters are missing"
+tap filters "Next 7 days"
+wait_for filter 'text="Call dentist"' 10 "the Next 7 days filter doesn't show tomorrow's task"
+shot 9-filter
+adb shell input keyevent KEYCODE_BACK
+sleep 1
+adb shell input keyevent KEYCODE_BACK
+sleep 1
+dump before-productivity
+tap before-productivity "Productivity"
+wait_for productivity 'content-desc="Karma ' 10 "the productivity page didn't open"
+shot 10-productivity
+adb shell input keyevent KEYCODE_BACK
+sleep 1
+echo "PASS: filters and productivity"
 
 echo "--- Search"
 dump before-search
-tap before-search "Search"
+tap before-search "Search" last
 sleep 2
 adb shell input text "report"
 sleep 1
 hide_keyboard
 wait_for search 'text="Write report"' 10 "search didn't find the task"
-shot 8-search
-adb shell input keyevent KEYCODE_BACK
-sleep 1
+shot 11-search
 echo "PASS: search"
 
 echo "--- Dark theme"
@@ -178,7 +226,7 @@ sleep 1
 dump browse-dark
 tap browse-dark "Today" last
 sleep 2
-shot 9-today-dark
+shot 12-today-dark
 echo "PASS: dark theme"
 
 if adb logcat -d | grep -q "FATAL EXCEPTION"; then

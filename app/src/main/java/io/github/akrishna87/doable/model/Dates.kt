@@ -86,27 +86,6 @@ object Dates {
         return due == today && time.isBefore(now.toLocalTime())
     }
 
-    /** The next date a repeating task is due after it's completed: at least one step on, and not before today. */
-    fun nextDue(due: LocalDate, repeat: Repeat, today: LocalDate): LocalDate {
-        if (repeat == Repeat.NONE) return due
-        var next = step(due, repeat)
-        while (next.isBefore(today)) next = step(next, repeat)
-        return next
-    }
-
-    private fun step(day: LocalDate, repeat: Repeat): LocalDate = when (repeat) {
-        Repeat.NONE -> day
-        Repeat.DAILY -> day.plusDays(1)
-        Repeat.WEEKDAYS -> {
-            var d = day.plusDays(1)
-            while (d.dayOfWeek == DayOfWeek.SATURDAY || d.dayOfWeek == DayOfWeek.SUNDAY) d = d.plusDays(1)
-            d
-        }
-        Repeat.WEEKLY -> day.plusWeeks(1)
-        Repeat.MONTHLY -> day.plusMonths(1)
-        Repeat.YEARLY -> day.plusYears(1)
-    }
-
     /** Todoist order: by date (undated last), timed tasks first within a day, then priority, then the order they were added. */
     val taskOrder: Comparator<Task> = compareBy<Task>(
         { it.due == null },
@@ -139,12 +118,75 @@ object Dates {
     fun withLabel(tasks: List<Task>, label: String): List<Task> =
         tasks.filter { !it.done && it.labels.any { l -> l.equals(label, true) } }.sortedWith(taskOrder)
 
-    /** When a task's reminder should go off, or null if it has none (no time, already done, or switched off). */
-    fun reminderAt(task: Task): LocalDateTime? {
-        if (task.done || !task.reminder) return null
-        val due = task.due ?: return null
-        val time = task.time ?: return null
-        return LocalDateTime.of(due, time)
+    /** When each of a task's reminders goes off, by reminder id; none for a finished task. */
+    fun reminderTimes(task: Task): List<Pair<String, LocalDateTime>> =
+        if (task.done) emptyList() else task.reminders.mapNotNull { r -> r.time(task)?.let { r.id to it } }
+
+    /** "30 min", "1 h", "1 h 30 min". */
+    fun durationLabel(minutes: Int): String {
+        val h = minutes / 60
+        val m = minutes % 60
+        return when {
+            h == 0 -> "$m min"
+            m == 0 -> "$h h"
+            else -> "$h h $m min"
+        }
+    }
+
+    /** "9:00 – 10:30" for a task with a time and a duration. */
+    fun timeRange(task: Task, is24Hour: Boolean, locale: Locale = Locale.getDefault()): String? {
+        val t = task.time ?: return null
+        val f = timeFormatter(is24Hour, locale)
+        val d = task.duration ?: return f.format(t)
+        return "${f.format(t)} – ${f.format(t.plusMinutes(d.toLong()))}"
+    }
+
+    /** Sorts a list the way its view options say. Manual order is the order tasks were placed in. */
+    fun sorted(tasks: List<Task>, options: ViewOptions): List<Task> {
+        val c: Comparator<Task> = when (options.sort) {
+            SortBy.MANUAL -> compareBy({ it.order }, { it.createdAt })
+            SortBy.DATE -> taskOrder
+            SortBy.PRIORITY -> priorityOrder
+            SortBy.NAME -> compareBy<Task> { it.title.lowercase() }.thenBy { it.createdAt }
+            SortBy.ADDED -> compareBy { it.createdAt }
+        }
+        return tasks.sortedWith(if (options.descending) c.reversed() else c)
+    }
+
+    /**
+     * Groups a sorted list the way its view options say, keeping the order inside each group.
+     * Each group has a heading; with no grouping there is one group with an empty heading.
+     */
+    fun grouped(tasks: List<Task>, options: ViewOptions, data: Data, today: LocalDate, locale: Locale = Locale.getDefault()): List<Pair<String, List<Task>>> =
+        when (options.group) {
+            GroupBy.NONE -> listOf("" to tasks)
+            GroupBy.PRIORITY -> tasks.groupBy { it.priority }.toSortedMap().map { (p, l) -> Priority.label(p) to l }
+            GroupBy.PROJECT -> tasks.groupBy { it.projectId }.entries
+                .sortedBy { e -> data.allProjects.indexOfFirst { it.id == e.key }.let { if (it < 0) Int.MAX_VALUE else it } }
+                .map { (id, l) -> data.project(id).name to l }
+            GroupBy.LABEL -> {
+                val names = tasks.flatMap { it.labels }.distinctBy { it.lowercase() }.sortedBy { it.lowercase() }
+                names.map { n -> "@$n" to tasks.filter { t -> t.labels.any { it.equals(n, true) } } } +
+                    listOfNotNull(tasks.filter { it.labels.isEmpty() }.takeIf { it.isNotEmpty() }?.let { "No labels" to it })
+            }
+            GroupBy.DATE -> {
+                val (dated, undated) = tasks.partition { it.due != null }
+                val overdue = dated.filter { it.due!!.isBefore(today) }
+                val days = dated.filter { !it.due!!.isBefore(today) }.groupBy { it.due!! }.toSortedMap()
+                listOfNotNull(overdue.takeIf { it.isNotEmpty() }?.let { "Overdue" to it }) +
+                    days.map { (d, l) -> dayHeading(d, today, locale) to l } +
+                    listOfNotNull(undated.takeIf { it.isNotEmpty() }?.let { "No date" to it })
+            }
+        }
+
+    /** "Due in 3 days", "Deadline today", "2 days late" for a task's deadline. */
+    fun deadlineLabel(deadline: LocalDate, today: LocalDate, locale: Locale = Locale.getDefault()): String {
+        val days = ChronoUnit.DAYS.between(today, deadline)
+        return when {
+            days < 0 -> if (days == -1L) "1 day late" else "${-days} days late"
+            days == 0L -> "Deadline today"
+            else -> dayLabel(deadline, today, locale)
+        }
     }
 
     fun shortDate(millis: Long, today: LocalDate, locale: Locale = Locale.getDefault(), zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): String {
