@@ -210,7 +210,17 @@ fun TaskDetailPage(id: String, data: Data) {
             },
         )
 
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+        // A comment you add scrolls into view.
+        val scroll = rememberScrollState()
+        var seenComments by remember(id) { mutableStateOf(task.comments.size) }
+        LaunchedEffect(task.comments.size) {
+            if (task.comments.size > seenComments) {
+                delay(100)
+                scroll.animateScrollTo(scroll.maxValue)
+            }
+            seenComments = task.comments.size
+        }
+        Column(Modifier.weight(1f).verticalScroll(scroll)) {
             Row(Modifier.padding(start = 6.dp, end = 16.dp), verticalAlignment = Alignment.Top) {
                 PriorityCheck(task, onToggle = { actions.toggle(task) }, size = 24.dp)
                 PlainField(
