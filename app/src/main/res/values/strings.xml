@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Doable</string>
+    <string name="widget_name">Doable: Today</string>
+    <string name="widget_description">Today\'s and overdue tasks. Tick them off or add one.</string>
+</resources>
