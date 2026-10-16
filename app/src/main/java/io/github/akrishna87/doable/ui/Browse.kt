@@ -56,6 +56,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.material.icons.rounded.Tag
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
@@ -101,34 +103,42 @@ fun BrowseScreen(data: Data, padding: PaddingValues) {
     ) {
         item {
             ScreenHeader("Browse") {
-                IconButton(onClick = { nav.push(Page.SettingsPage) }, Modifier.semantics { contentDescription = "Settings" }) { Icon(Icons.Rounded.Settings, null) }
+                SearchAction()
+                CircleAction(Icons.Rounded.Settings, "Settings") { nav.push(Page.SettingsPage) }
             }
         }
-        item {
+        item(key = "inbox") {
             ListRow(
                 "Inbox",
-                leading = { Icon(Icons.Rounded.Inbox, null, tint = Color(ProjectColors.Inbox)) },
+                Modifier.cardSegment(0, 1),
+                leading = { IconTile(Icons.Rounded.Inbox, Color(ProjectColors.Inbox)) },
                 trailing = { Count(open.count { it.projectId == INBOX_ID }) },
                 onClick = { nav.push(Page.ProjectPage(INBOX_ID)) },
             )
         }
         if (favProjects.isNotEmpty() || favLabels.isNotEmpty() || favFilters.isNotEmpty()) {
             item { SectionHeader("Favourites") }
-            items(favProjects, key = { "fp-" + it.id }) { p ->
-                ListRow(p.name, leading = { Text("#", style = MaterialTheme.typography.titleLarge, color = Color(p.color)) },
-                    trailing = { Count(open.count { it.projectId == p.id }) }, onClick = { nav.push(Page.ProjectPage(p.id)) })
-            }
-            items(favFilters, key = { "ff-" + it.id }) { f ->
-                ListRow(f.name, leading = { Icon(Icons.Rounded.FilterList, null, tint = Color(f.color)) }, onClick = { nav.push(Page.FilterPage(f.id)) })
-            }
-            items(favLabels, key = { "fl-" + it.name }) { l ->
-                ListRow(l.name, leading = { Icon(Icons.Rounded.Label, null, tint = Color(l.color)) },
-                    trailing = { Count(open.count { t -> t.labels.any { it.equals(l.name, true) } }) }, onClick = { nav.push(Page.LabelPage(l.name)) })
-            }
+            val favs: List<Pair<String, @Composable (Modifier) -> Unit>> =
+                favProjects.map { p ->
+                    ("fp-" + p.id) to @Composable { m: Modifier ->
+                        ListRow(p.name, m, leading = { IconTile(Icons.Rounded.Tag, Color(p.color)) },
+                            trailing = { Count(open.count { it.projectId == p.id }) }, onClick = { nav.push(Page.ProjectPage(p.id)) })
+                    }
+                } + favFilters.map { f ->
+                    ("ff-" + f.id) to @Composable { m: Modifier ->
+                        ListRow(f.name, m, leading = { IconTile(Icons.Rounded.FilterList, Color(f.color)) }, onClick = { nav.push(Page.FilterPage(f.id)) })
+                    }
+                } + favLabels.map { l ->
+                    ("fl-" + l.name) to @Composable { m: Modifier ->
+                        ListRow(l.name, m, leading = { IconTile(Icons.Rounded.Label, Color(l.color)) },
+                            trailing = { Count(open.count { t -> t.labels.any { it.equals(l.name, true) } }) }, onClick = { nav.push(Page.LabelPage(l.name)) })
+                    }
+                }
+            cardItems(favs, key = { it.first }) { (_, row), seg -> row(seg) }
         }
         item {
             SectionHeader("My projects") {
-                IconButton(onClick = { newProject = true }, Modifier.semantics { contentDescription = "Add project" }) { Icon(Icons.Rounded.Add, null) }
+                IconButton(onClick = { newProject = true }, Modifier.semantics { contentDescription = "Add project" }) { Icon(Icons.Rounded.Add, null, tint = MaterialTheme.colorScheme.primary) }
             }
         }
         val tree = data.projectTree()
@@ -136,48 +146,32 @@ fun BrowseScreen(data: Data, padding: PaddingValues) {
             item {
                 Text(
                     "Group tasks into projects, like Work or Home. Tap + to add one.",
-                    Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+                    Modifier.padding(horizontal = 22.dp, vertical = 8.dp),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
-        items(tree, key = { "p-" + it.first.id }) { (p, depth) ->
-            ProjectRow(p, depth, open.count { it.projectId == p.id })
+        cardItems(tree, key = { "p-" + it.first.id }) { (p, depth), seg ->
+            Box(seg) { ProjectRow(p, depth, open.count { it.projectId == p.id }) }
         }
         item { SectionHeader("More") }
-        item {
-            ListRow("Filters & Labels", leading = { Icon(Icons.Rounded.FilterList, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
-                trailing = { Count(data.filters.size + data.labels.size) }, onClick = { nav.push(Page.FiltersLabels) })
+        val more = buildList<Triple<String, ImageVector, Pair<Color, () -> Unit>>> {
+            add(Triple("Filters & Labels", Icons.Rounded.FilterList, Color(0xFF7C3AED) to { nav.push(Page.FiltersLabels) }))
+            add(Triple("Completed", Icons.Rounded.CheckCircle, Color(0xFF0B8463) to { nav.push(Page.Completed) }))
+            if (data.settings.karma) add(Triple("Productivity", Icons.Rounded.Insights, Color(0xFFF5A524) to { nav.push(Page.Productivity) }))
+            add(Triple("Activity", Icons.Rounded.History, Color(0xFF2563EB) to { nav.push(Page.ActivityLog) }))
+            if (data.projects.any { it.archived }) add(Triple("Archived projects", Icons.Rounded.Archive, Color(0xFF6B6D7B) to { nav.push(Page.Archived) }))
+            add(Triple("Settings", Icons.Rounded.Settings, Color(0xFF5D5F6E) to { nav.push(Page.SettingsPage) }))
         }
-        item {
-            ListRow(
-                "Completed",
-                leading = { Icon(Icons.Rounded.CheckCircle, null, tint = LocalExtra.current.complete) },
-                trailing = { Count(data.tasks.count { it.done }) },
-                onClick = { nav.push(Page.Completed) },
-            )
-        }
-        if (data.settings.karma) {
-            item {
-                ListRow("Productivity", leading = { Icon(Icons.Rounded.Insights, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) }, onClick = { nav.push(Page.Productivity) })
+        cardItems(more, key = { "m-" + it.first }) { (label, icon, rest), seg ->
+            val count = when (label) {
+                "Filters & Labels" -> data.filters.size + data.labels.size
+                "Completed" -> data.tasks.count { it.done }
+                "Archived projects" -> data.projects.count { it.archived }
+                else -> 0
             }
-        }
-        item {
-            ListRow("Activity", leading = { Icon(Icons.Rounded.History, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) }, onClick = { nav.push(Page.ActivityLog) })
-        }
-        if (data.projects.any { it.archived }) {
-            item {
-                ListRow("Archived projects", leading = { Icon(Icons.Rounded.Archive, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
-                    trailing = { Count(data.projects.count { it.archived }) }, onClick = { nav.push(Page.Archived) })
-            }
-        }
-        item {
-            ListRow(
-                "Settings",
-                leading = { Icon(Icons.Rounded.Settings, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
-                onClick = { nav.push(Page.SettingsPage) },
-            )
+            ListRow(label, seg, leading = { IconTile(icon, rest.first) }, trailing = { Count(count) }, onClick = rest.second)
         }
     }
     if (newProject) {
@@ -208,7 +202,7 @@ private fun ProjectRow(p: Project, depth: Int, count: Int) {
         ListRow(
             p.name,
             modifier = Modifier.padding(start = (depth * 20).dp),
-            leading = { Text("#", style = MaterialTheme.typography.titleLarge, color = Color(p.color)) },
+            leading = { IconTile(Icons.Rounded.Tag, Color(p.color)) },
             trailing = {
                 if (p.favorite) Icon(Icons.Rounded.Star, "Favourite", Modifier.size(16.dp).padding(end = 2.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 Count(count)
@@ -388,7 +382,8 @@ fun SettingsPage(data: Data) {
         PageBar("Settings", onBack = { nav.pop() })
         LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 32.dp)) {
             item { SectionHeader("Theme") }
-            items(ThemeMode.entries) { mode ->
+            card {
+            for (mode in ThemeMode.entries) row {
                 ListRow(
                     mode.label,
                     leading = { RadioButton(selected = s.theme == mode, onClick = null) },
@@ -396,7 +391,7 @@ fun SettingsPage(data: Data) {
                     modifier = Modifier.semantics { contentDescription = "Theme: ${mode.label}" },
                 )
             }
-            item {
+            row {
                 Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
                     Text("Colour", style = MaterialTheme.typography.labelLarge)
                     androidx.compose.foundation.layout.FlowRow(Modifier.padding(top = 8.dp), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp), verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp)) {
@@ -416,8 +411,10 @@ fun SettingsPage(data: Data) {
                 }
             }
 
+            }
             item { SectionHeader("General") }
-            item {
+            card {
+            row {
                 Box {
                     ListRow("Start page", detail = startLabel(s.startPage), onClick = { startMenu = true })
                     DropdownMenu(expanded = startMenu, onDismissRequest = { startMenu = false }) {
@@ -426,14 +423,14 @@ fun SettingsPage(data: Data) {
                     }
                 }
             }
-            item {
+            row {
                 ListRow(
                     "Week starts on Sunday",
                     trailing = { Switch(checked = s.weekStartsSunday, onCheckedChange = { on -> Store.updateSettings { it.copy(weekStartsSunday = on) } }) },
                     onClick = { Store.updateSettings { it.copy(weekStartsSunday = !it.weekStartsSunday) } },
                 )
             }
-            item {
+            row {
                 ListRow(
                     "Smart date recognition",
                     detail = "Read dates, #projects and @labels typed into a task",
@@ -441,7 +438,7 @@ fun SettingsPage(data: Data) {
                     onClick = { Store.updateSettings { it.copy(smartDates = !it.smartDates) } },
                 )
             }
-            item {
+            row {
                 Box {
                     ListRow("Swipe right", detail = s.swipeRight.label, onClick = { rightMenu = true })
                     DropdownMenu(expanded = rightMenu, onDismissRequest = { rightMenu = false }) {
@@ -449,7 +446,7 @@ fun SettingsPage(data: Data) {
                     }
                 }
             }
-            item {
+            row {
                 Box {
                     ListRow("Swipe left", detail = s.swipeLeft.label, onClick = { leftMenu = true })
                     DropdownMenu(expanded = leftMenu, onDismissRequest = { leftMenu = false }) {
@@ -458,8 +455,10 @@ fun SettingsPage(data: Data) {
                 }
             }
 
+            }
             item { SectionHeader("Reminders") }
-            item {
+            card {
+            row {
                 ListRow(
                     "Reminders",
                     detail = "Notifications at the times you set on tasks",
@@ -467,7 +466,7 @@ fun SettingsPage(data: Data) {
                     onClick = { Store.updateSettings { it.copy(reminders = !it.reminders) } },
                 )
             }
-            item {
+            row {
                 Box {
                     ListRow("Automatic reminder", detail = (s.autoReminder?.let { Reminder(minutesBefore = it).label() } ?: "None") + " · for tasks given a time", onClick = { reminderMenu = true })
                     DropdownMenu(expanded = reminderMenu, onDismissRequest = { reminderMenu = false }) {
@@ -476,7 +475,7 @@ fun SettingsPage(data: Data) {
                     }
                 }
             }
-            item {
+            row {
                 ListRow(
                     "Daily summary",
                     detail = s.dailySummary?.let { "Each day at " + Dates.timeFormatter(LocalClock.current.is24Hour).format(it) } ?: "Off · a morning list of the day's tasks",
@@ -487,7 +486,7 @@ fun SettingsPage(data: Data) {
                 )
             }
             if (s.reminders && !canNotify) {
-                item {
+                row {
                     ListRow(
                         "Notifications are off",
                         detail = "Tap to allow them, or reminders can't appear",
@@ -506,7 +505,7 @@ fun SettingsPage(data: Data) {
                 }
             }
             if (s.reminders && !canExact && Build.VERSION.SDK_INT >= 31) {
-                item {
+                row {
                     ListRow(
                         "Reminders may be a few minutes late",
                         detail = "Tap to allow exact alarms for on-time reminders",
@@ -520,8 +519,10 @@ fun SettingsPage(data: Data) {
                 }
             }
 
+            }
             item { SectionHeader("Productivity") }
-            item {
+            card {
+            row {
                 ListRow(
                     "Karma",
                     detail = "Points, goals and streaks for completing tasks",
@@ -530,7 +531,7 @@ fun SettingsPage(data: Data) {
                 )
             }
             if (s.karma) {
-                item {
+                row {
                     Box {
                         ListRow("Daily goal", detail = "${s.dailyGoal} tasks", onClick = { goalMenu = true })
                         DropdownMenu(expanded = goalMenu, onDismissRequest = { goalMenu = false }) {
@@ -538,7 +539,7 @@ fun SettingsPage(data: Data) {
                         }
                     }
                 }
-                item {
+                row {
                     Box {
                         ListRow("Weekly goal", detail = "${s.weeklyGoal} tasks", onClick = { weekGoalMenu = true })
                         DropdownMenu(expanded = weekGoalMenu, onDismissRequest = { weekGoalMenu = false }) {
@@ -546,7 +547,7 @@ fun SettingsPage(data: Data) {
                         }
                     }
                 }
-                item {
+                row {
                     Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
                         Text("Days off", style = MaterialTheme.typography.bodyLarge)
                         Text("Streaks don't break on these days", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -564,7 +565,7 @@ fun SettingsPage(data: Data) {
                         }
                     }
                 }
-                item {
+                row {
                     ListRow(
                         "Vacation mode",
                         detail = "Pause goals and streaks",
@@ -574,22 +575,24 @@ fun SettingsPage(data: Data) {
                 }
             }
 
+            }
             item { SectionHeader("Backup and import") }
-            item {
+            card {
+            row {
                 ListRow(
                     "Export backup",
                     detail = "Save every task and project to a file",
                     onClick = { exporter.launch("doable-backup-${LocalDate.now()}.json") },
                 )
             }
-            item {
+            row {
                 ListRow(
                     "Restore from backup",
                     detail = "Replace everything with a backup file",
                     onClick = { importer.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) },
                 )
             }
-            item {
+            row {
                 ListRow(
                     "Import a Todoist template (CSV)",
                     leading = { Icon(Icons.Rounded.UploadFile, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
@@ -597,12 +600,15 @@ fun SettingsPage(data: Data) {
                     onClick = { csvImporter.launch(arrayOf("text/csv", "text/comma-separated-values", "text/plain", "application/octet-stream", "*/*")) },
                 )
             }
+            }
             item { SectionHeader("About") }
-            item {
+            card {
+            row {
                 val version = remember {
                     runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() ?: ""
                 }
                 ListRow("Doable", detail = "Version $version · Your tasks, on your phone only")
+            }
             }
         }
     }

@@ -58,6 +58,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.background
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -228,8 +233,8 @@ fun TaskDetailPage(id: String, data: Data) {
                     onChange = { title = it },
                     placeholder = "Task name",
                     description = "Task title",
-                    style = MaterialTheme.typography.titleLarge,
-                    modifier = Modifier.padding(top = 9.dp),
+                    style = MaterialTheme.typography.headlineSmall,
+                    modifier = Modifier.padding(top = 7.dp),
                 )
             }
             PlainField(
@@ -240,14 +245,15 @@ fun TaskDetailPage(id: String, data: Data) {
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(start = 50.dp, end = 16.dp, top = 2.dp),
             )
-            HorizontalDivider(Modifier.padding(top = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
-
+            Spacer(Modifier.height(12.dp))
+            KitCard(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), padding = PaddingValues(vertical = 6.dp)) {
             DetailRow(
                 Icons.Rounded.CalendarToday,
                 task.due?.let { Dates.dayLabel(it, clock.today) } ?: "Due date",
                 if (task.due != null) toneColor(Dates.tone(task, clock.now)) else muted,
                 onClick = { dueMenu = true },
                 onClear = if (task.due != null) ({ update { it.copy(due = null, time = null, repeat = null, duration = null) } }) else null,
+                hue = MaterialTheme.colorScheme.primary,
             ) {
                 DueMenu(dueMenu, { dueMenu = false }, clock.today, Dates.weekStart(data.settings), onPick = { d ->
                     update { if (d == null) it.copy(due = null, time = null, repeat = null, duration = null) else it.copy(due = d) }
@@ -260,6 +266,7 @@ fun TaskDetailPage(id: String, data: Data) {
                     if (task.time != null) MaterialTheme.colorScheme.onSurface else muted,
                     onClick = { pickingTime = true },
                     onClear = if (task.time != null) ({ update { it.copy(time = null, duration = null) } }) else null,
+                    hue = Color(0xFF0E8A8A),
                 )
                 if (task.time != null) {
                     DetailRow(
@@ -268,6 +275,7 @@ fun TaskDetailPage(id: String, data: Data) {
                         if (task.duration != null) MaterialTheme.colorScheme.onSurface else muted,
                         onClick = { durationMenu = true },
                         onClear = if (task.duration != null) ({ update { it.copy(duration = null) } }) else null,
+                        hue = Color(0xFF0E8A8A),
                     ) { DurationMenu(durationMenu, task.duration, { durationMenu = false }) { m -> update { it.copy(duration = m) } } }
                 }
                 DetailRow(
@@ -275,6 +283,7 @@ fun TaskDetailPage(id: String, data: Data) {
                     task.repeat?.label() ?: "Doesn't repeat",
                     if (task.repeat != null) MaterialTheme.colorScheme.onSurface else muted,
                     onClick = { repeatMenu = true },
+                    hue = Color(0xFF2563EB),
                 ) {
                     RepeatMenu(repeatMenu, task.repeat, { repeatMenu = false }, onCustom = { customRepeat = true }) { r -> update { it.copy(repeat = r) } }
                 }
@@ -285,6 +294,7 @@ fun TaskDetailPage(id: String, data: Data) {
                 task.deadline?.let { if (it.isAfter(clock.today)) MaterialTheme.colorScheme.onSurface else LocalExtra.current.overdue } ?: muted,
                 onClick = { deadlineMenu = true },
                 onClear = if (task.deadline != null) ({ update { it.copy(deadline = null) } }) else null,
+                hue = Color(0xFFC2410C),
             ) {
                 DueMenu(deadlineMenu, { deadlineMenu = false }, clock.today, Dates.weekStart(data.settings), onPick = { d -> update { it.copy(deadline = d) } }, onPickDate = { pickingDeadline = true })
             }
@@ -293,6 +303,7 @@ fun TaskDetailPage(id: String, data: Data) {
                 Priority.label(task.priority),
                 if (task.priority < Priority.NONE) Color(Priority.color(task.priority)) else muted,
                 onClick = { priorityMenu = true },
+                hue = if (task.priority < Priority.NONE) Color(Priority.color(task.priority)) else Color(0xFF6B6D7B),
             ) {
                 PriorityMenu(priorityMenu, task.priority, { priorityMenu = false }) { p -> update { it.copy(priority = p) } }
             }
@@ -301,6 +312,7 @@ fun TaskDetailPage(id: String, data: Data) {
                 if (task.labels.isEmpty()) "Labels" else task.labels.joinToString("  ") { "@$it" },
                 if (task.labels.isEmpty()) muted else MaterialTheme.colorScheme.onSurface,
                 onClick = { labelsDialog = true },
+                hue = Color(0xFF7C3AED),
             )
 
             // Reminders: each one with its own remove button, and a row to add another.
@@ -312,9 +324,9 @@ fun TaskDetailPage(id: String, data: Data) {
                     r.label() + (at?.let { " (" + Dates.timeFormatter(clock.is24Hour).format(it) + ")" } ?: "")
                 }
                 DetailRow(Icons.Rounded.Notifications, text, MaterialTheme.colorScheme.onSurface, onClick = { addingReminder = true },
-                    onClear = { update { t -> t.copy(reminders = t.reminders.filter { it.id != r.id }) } })
+                    onClear = { update { t -> t.copy(reminders = t.reminders.filter { it.id != r.id }) } }, hue = Color(0xFFB45309))
             }
-            DetailRow(Icons.Rounded.Notifications, if (task.reminders.isEmpty()) "Reminders" else "Add another reminder", muted, onClick = { addingReminder = true })
+            DetailRow(Icons.Rounded.Notifications, if (task.reminders.isEmpty()) "Reminders" else "Add another reminder", muted, onClick = { addingReminder = true }, hue = Color(0xFFB45309))
 
             val parent = data.task(task.parentId)
             if (parent != null) {
@@ -322,9 +334,20 @@ fun TaskDetailPage(id: String, data: Data) {
                     nav.push(Page.TaskPage(parent.id))
                 })
             }
+            }
 
             val subs = data.subtasks(id)
             SectionHeader(if (subs.isEmpty()) "Sub-tasks" else "Sub-tasks  ${subs.count { it.done }}/${subs.size}")
+            KitCard(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+            if (subs.isNotEmpty()) {
+                LinearProgressIndicator(
+                    progress = { subs.count { it.done } / subs.size.toFloat() },
+                    modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 4.dp).height(6.dp).clip(CircleShape),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = LocalKit.current.chip,
+                    drawStopIndicator = {},
+                )
+            }
             for (s in subs) TaskRow(s, data, showProject = false) { nav.push(Page.TaskPage(s.id)) }
             Row(
                 Modifier
@@ -335,7 +358,8 @@ fun TaskDetailPage(id: String, data: Data) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(Icons.Rounded.Add, null, tint = MaterialTheme.colorScheme.primary)
-                Text("Add sub-task", Modifier.padding(start = 20.dp), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodyLarge)
+                Text("Add sub-task", Modifier.padding(start = 20.dp), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
+            }
             }
 
             SectionHeader(if (task.comments.isEmpty()) "Comments" else "Comments · ${task.comments.size}")
@@ -357,7 +381,6 @@ fun TaskDetailPage(id: String, data: Data) {
         }
 
         // Writing a comment, with an optional file or photo.
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         pendingFile?.let { f ->
             Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(if (f.isImage) Icons.Rounded.PhotoCamera else Icons.Rounded.InsertDriveFile, null, Modifier.size(18.dp), tint = muted)
@@ -365,7 +388,12 @@ fun TaskDetailPage(id: String, data: Data) {
                 IconButton(onClick = { Attachments.delete(context, f); pendingFile = null }, Modifier.semantics { contentDescription = "Remove attachment" }) { Icon(Icons.Rounded.Close, null) }
             }
         }
-        Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 8.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 12.dp)
+                .softShadow(RoundedCornerShape(28.dp), 10.dp).clip(RoundedCornerShape(28.dp)).background(LocalKit.current.card)
+                .padding(start = 4.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Box {
                 IconButton(onClick = { attachMenu = true }, Modifier.semantics { contentDescription = "Attach" }) { Icon(Icons.Rounded.AttachFile, null) }
                 DropdownMenu(expanded = attachMenu, onDismissRequest = { attachMenu = false }) {
@@ -467,18 +495,19 @@ private fun DetailRow(
     tint: Color,
     onClick: () -> Unit,
     onClear: (() -> Unit)? = null,
+    hue: Color = MaterialTheme.colorScheme.primary,
     menu: @Composable () -> Unit = {},
 ) {
     Box {
         Row(
-            Modifier.fillMaxWidth().clickable(onClick = onClick).padding(start = 20.dp, end = 8.dp).padding(vertical = 4.dp),
+            Modifier.fillMaxWidth().clickable(onClick = onClick).padding(start = 14.dp, end = 6.dp).padding(vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(icon, null, Modifier.size(22.dp), tint = tint)
+            IconTile(icon, hue)
             Text(
                 text,
-                Modifier.weight(1f).padding(start = 20.dp, top = 12.dp, bottom = 12.dp),
-                style = MaterialTheme.typography.bodyLarge,
+                Modifier.weight(1f).padding(start = 14.dp, top = 10.dp, bottom = 10.dp),
+                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
                 color = tint,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,

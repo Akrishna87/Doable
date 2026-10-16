@@ -358,7 +358,7 @@ enum class ThemeMode(val label: String) { SYSTEM("System default"), LIGHT("Light
 
 /** Colour themes, like Todoist Pro's. */
 enum class Accent(val label: String, val light: Int, val dark: Int) {
-    INDIGO("Doable", 0xFF5B5BD6.toInt(), 0xFF9FA0F5.toInt()),
+    INDIGO("Doable", 0xFF5B5BF0.toInt(), 0xFFA5A6FF.toInt()),
     TOMATO("Tomato", 0xFFDC4C3E.toInt(), 0xFFFF8A7E.toInt()),
     MOONSTONE("Moonstone", 0xFF5C6B7A.toInt(), 0xFFA9B6C4.toInt()),
     TANGERINE("Tangerine", 0xFFE36B00.toInt(), 0xFFFFA45C.toInt()),

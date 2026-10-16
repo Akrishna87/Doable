@@ -51,6 +51,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.material.icons.rounded.ArrowUpward
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
@@ -172,7 +174,7 @@ fun QuickAddPanel(defaults: QuickAddDefaults, data: Data, onClose: () -> Unit) {
         Box(
             Modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.32f))
+                .background(Color(0xFF0A0A14).copy(alpha = 0.45f))
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClose),
         )
         Surface(
@@ -180,11 +182,12 @@ fun QuickAddPanel(defaults: QuickAddDefaults, data: Data, onClose: () -> Unit) {
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars)),
-            shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
-            color = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+            color = LocalKit.current.card,
             shadowElevation = 12.dp,
         ) {
-            Column(Modifier.padding(start = 16.dp, end = 12.dp, top = 16.dp, bottom = 8.dp)) {
+            Column(Modifier.padding(start = 20.dp, end = 16.dp, top = 10.dp, bottom = 12.dp)) {
+                Box(Modifier.align(Alignment.CenterHorizontally).padding(bottom = 10.dp).size(width = 40.dp, height = 5.dp).clip(CircleShape).background(LocalKit.current.line))
                 val context = data.task(defaults.parentId)?.let { "Sub-task of “${it.title}”" }
                 if (context != null) {
                     Text(context, Modifier.padding(bottom = 6.dp), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -194,7 +197,7 @@ fun QuickAddPanel(defaults: QuickAddDefaults, data: Data, onClose: () -> Unit) {
                     onChange = { text = it },
                     placeholder = "e.g. Pay rent friday 9am p1 @bills",
                     description = "Task name",
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.titleLarge,
                     modifier = Modifier.focusRequester(focus),
                     transformation = Highlight(parsed.matches, extra.highlight),
                     imeAction = ImeAction.Done,
@@ -251,17 +254,18 @@ fun QuickAddPanel(defaults: QuickAddDefaults, data: Data, onClose: () -> Unit) {
                     if (parsed.duration != null && effTime != null) QuickChip(Icons.Rounded.Timer, Dates.durationLabel(parsed.duration), null) {}
                 }
 
-                HorizontalDivider(Modifier.padding(top = 12.dp, bottom = 4.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                HorizontalDivider(Modifier.padding(top = 14.dp, bottom = 8.dp), color = MaterialTheme.colorScheme.outlineVariant)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box {
                         val project = data.project(effProject)
                         val section = data.section(effSection)
                         Row(
                             Modifier
-                                .clip(RoundedCornerShape(8.dp))
+                                .clip(CircleShape)
+                                .background(LocalKit.current.chip)
                                 .clickable(enabled = defaults.parentId == null) { projectMenu = true }
                                 .semantics { contentDescription = "Project: ${project.name}" + (section?.let { " / ${it.name}" } ?: "") }
-                                .padding(horizontal = 8.dp, vertical = 8.dp),
+                                .padding(start = 12.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             ColorDot(project.color)
@@ -289,8 +293,8 @@ fun QuickAddPanel(defaults: QuickAddDefaults, data: Data, onClose: () -> Unit) {
                     FilledIconButton(
                         onClick = ::add,
                         enabled = parsed.title.isNotBlank(),
-                        modifier = Modifier.semantics { contentDescription = "Add task" },
-                    ) { Icon(Icons.AutoMirrored.Rounded.Send, null) }
+                        modifier = Modifier.size(48.dp).semantics { contentDescription = "Add task" },
+                    ) { Icon(Icons.Rounded.ArrowUpward, null) }
                 }
             }
         }
@@ -307,14 +311,16 @@ fun QuickAddPanel(defaults: QuickAddDefaults, data: Data, onClose: () -> Unit) {
 
 @Composable
 private fun QuickChip(icon: ImageVector, label: String, color: Color?, onClick: () -> Unit) {
-    val fg = color ?: MaterialTheme.colorScheme.onSurfaceVariant
+    val k = LocalKit.current
+    val fg = color ?: k.sub
+    val shape = RoundedCornerShape(12.dp)
     Row(
         Modifier
-            .clip(RoundedCornerShape(8.dp))
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
+            .clip(shape)
+            .then(if (color != null) Modifier.background(color.copy(alpha = if (k.dark) 0.22f else 0.12f)) else Modifier.border(1.dp, k.line, shape))
             .clickable(onClick = onClick)
             .semantics { contentDescription = label }
-            .padding(horizontal = 10.dp, vertical = 7.dp),
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(icon, null, Modifier.size(16.dp), tint = fg)

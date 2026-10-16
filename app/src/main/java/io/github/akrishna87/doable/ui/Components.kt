@@ -44,6 +44,8 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.Alignment
+import androidx.compose.material.icons.rounded.Schedule
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -135,23 +137,24 @@ fun TaskRow(
     val actions = LocalActions.current
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     val subs = if (task.parentId == null) data.subtasks(task.id) else emptyList()
-    Column(modifier.background(MaterialTheme.colorScheme.surface)) {
+    val kit = LocalKit.current
+    Column(modifier.background(kit.card)) {
         Row(
-            Modifier.fillMaxWidth().clickable(onClick = onClick).padding(start = 6.dp, end = 16.dp, top = 2.dp, bottom = 8.dp),
+            Modifier.fillMaxWidth().clickable(onClick = onClick).padding(start = 4.dp, end = 14.dp, top = 2.dp, bottom = 10.dp),
             verticalAlignment = Alignment.Top,
         ) {
             PriorityCheck(task, onToggle = { actions.toggle(task) })
             Column(Modifier.weight(1f).padding(top = 10.dp)) {
                 Text(
                     task.title,
-                    style = MaterialTheme.typography.bodyLarge,
+                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
                     maxLines = 3,
                     overflow = TextOverflow.Ellipsis,
                     color = if (task.done) muted else MaterialTheme.colorScheme.onSurface,
                     textDecoration = if (task.done) TextDecoration.LineThrough else null,
                 )
                 if (task.description.isNotBlank()) {
-                    Text(task.description.lineSequence().first(), style = MaterialTheme.typography.bodySmall, color = muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(task.description.lineSequence().first(), Modifier.padding(top = 1.dp), style = MaterialTheme.typography.bodySmall, color = muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 val due = when {
                     !showDue -> null
@@ -166,13 +169,13 @@ fun TaskRow(
                     task.comments.isNotEmpty() || (showProject && task.projectId != INBOX_ID)
                 if (hasMeta) {
                     FlowRow(
-                        Modifier.padding(top = 4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                        Modifier.padding(top = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
                         if (due != null) {
                             val c = toneColor(Dates.tone(task, clock.now))
-                            Meta(Icons.Rounded.CalendarToday, due, c)
+                            Meta(if (task.time != null) Icons.Rounded.Schedule else Icons.Rounded.CalendarToday, due, c)
                             if (task.repeat != null) Icon(Icons.Rounded.Repeat, task.repeat.label(), Modifier.size(14.dp).align(Alignment.CenterVertically), tint = c)
                         }
                         if (task.deadline != null && !task.done) {
@@ -181,28 +184,30 @@ fun TaskRow(
                         }
                         if (subs.isNotEmpty()) Meta(Icons.Rounded.SubdirectoryArrowRight, "${subs.count { it.done }}/${subs.size}", muted)
                         if (task.comments.isNotEmpty()) Meta(Icons.AutoMirrored.Rounded.Comment, task.comments.size.toString(), muted)
-                        for (l in task.labels) Text("@$l", style = MaterialTheme.typography.labelMedium, color = labelColor(data, l, muted))
+                        for (l in task.labels) {
+                            val c = data.labelInfo.firstOrNull { it.name.equals(l, true) }?.let { Color(it.color) }
+                            if (c != null) TintChip("@$l", c, Modifier.align(Alignment.CenterVertically)) else QuietChip("@$l", Modifier.align(Alignment.CenterVertically))
+                        }
                         if (project != null && task.projectId != INBOX_ID) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            Row(Modifier.align(Alignment.CenterVertically), verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.size(8.dp).clip(CircleShape).background(Color(project.color)))
+                                Spacer(Modifier.width(5.dp))
                                 Text(project.name + (section?.let { " / ${it.name}" } ?: ""), style = MaterialTheme.typography.labelMedium, color = muted)
-                                Spacer(Modifier.width(4.dp))
-                                Box(Modifier.size(7.dp).clip(CircleShape).background(Color(project.color)))
                             }
                         }
                     }
                 }
             }
         }
-        HorizontalDivider(Modifier.padding(start = 48.dp), color = MaterialTheme.colorScheme.outlineVariant)
     }
 }
 
 @Composable
 private fun Meta(icon: ImageVector, text: String, color: Color) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, Modifier.size(13.dp), tint = color)
-        Spacer(Modifier.width(3.dp))
-        Text(text, style = MaterialTheme.typography.labelMedium, color = color)
+        Icon(icon, null, Modifier.size(14.dp), tint = color)
+        Spacer(Modifier.width(4.dp))
+        Text(text, style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = color)
     }
 }
 
@@ -255,26 +260,26 @@ fun SwipeTask(task: Task, modifier: Modifier = Modifier, content: @Composable ()
 fun labelColor(data: Data, name: String, fallback: Color): Color =
     data.labelInfo.firstOrNull { it.name.equals(name, true) }?.let { Color(it.color) } ?: fallback
 
-/** A big screen title with an optional line under it and action icons on the right. */
+/** A big screen title, a small line above it, and round action buttons on the right. */
 @Composable
 fun ScreenHeader(title: String, subtitle: String? = null, modifier: Modifier = Modifier, actions: @Composable RowScope.() -> Unit = {}) {
-    Row(modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 12.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 20.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.headlineMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (subtitle != null) Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (subtitle != null) Text(subtitle, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold), color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+            Text(title, style = MaterialTheme.typography.headlineLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         actions()
     }
 }
 
-/** A plain top bar for pages: back, a title, and actions. */
+/** A top bar for pages: a round back button, a title, and actions. */
 @Composable
 fun PageBar(title: String = "", onBack: () -> Unit, leading: @Composable RowScope.() -> Unit = {}, actions: @Composable RowScope.() -> Unit = {}) {
-    Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        IconButton(onClick = onBack, Modifier.semantics { contentDescription = "Back" }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, null) }
+    Row(Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        CircleAction(Icons.AutoMirrored.Rounded.ArrowBack, "Back", onClick = onBack)
         leading()
         if (title.isNotEmpty()) {
-            Text(title, Modifier.weight(1f).padding(start = 4.dp), style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(title, Modifier.weight(1f).padding(start = 8.dp), style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
         } else {
             Spacer(Modifier.weight(1f))
         }
@@ -291,17 +296,15 @@ fun SearchAction() {
 
 @Composable
 fun SearchAction(onClick: () -> Unit) {
-    IconButton(onClick = onClick, Modifier.semantics { contentDescription = "Search" }) { Icon(Icons.Rounded.Search, null) }
+    CircleAction(Icons.Rounded.Search, "Search", onClick = onClick)
 }
 
+/** A bold heading over a group of rows. */
 @Composable
 fun SectionHeader(title: String, modifier: Modifier = Modifier, color: Color = MaterialTheme.colorScheme.onSurface, trailing: @Composable RowScope.() -> Unit = {}) {
-    Column(modifier) {
-        Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 16.dp).height(40.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, color = color)
-            trailing()
-        }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    Row(modifier.fillMaxWidth().padding(start = 22.dp, end = 10.dp, top = 18.dp, bottom = 6.dp).height(36.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold), color = color)
+        trailing()
     }
 }
 
@@ -309,10 +312,10 @@ fun SectionHeader(title: String, modifier: Modifier = Modifier, color: Color = M
 fun EmptyState(icon: ImageVector, title: String, message: String, modifier: Modifier = Modifier) {
     Column(modifier.fillMaxWidth().padding(horizontal = 40.dp, vertical = 48.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
-            Modifier.size(88.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
+            Modifier.size(96.dp).clip(RoundedCornerShape(32.dp)).background(MaterialTheme.colorScheme.primaryContainer),
             contentAlignment = Alignment.Center,
-        ) { Icon(icon, null, Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary) }
-        Text(title, Modifier.padding(top = 20.dp), style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
+        ) { Icon(icon, null, Modifier.size(44.dp), tint = MaterialTheme.colorScheme.primary) }
+        Text(title, Modifier.padding(top = 20.dp), style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center)
         Text(
             message,
             Modifier.padding(top = 6.dp),
@@ -350,13 +353,13 @@ fun ListRow(
                     else -> Modifier
                 },
             )
-            .padding(start = 20.dp, end = 12.dp)
-            .height(if (detail != null) 64.dp else 52.dp),
+            .padding(start = 16.dp, end = 12.dp)
+            .height(if (detail != null) 64.dp else 56.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.width(36.dp), contentAlignment = Alignment.CenterStart) { leading() }
+        Box(Modifier.width(48.dp), contentAlignment = Alignment.CenterStart) { leading() }
         Column(Modifier.weight(1f)) {
-            Text(label, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(label, style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (detail != null) Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
         }
         trailing()

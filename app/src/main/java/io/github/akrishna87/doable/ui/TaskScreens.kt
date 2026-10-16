@@ -62,6 +62,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.material.icons.rounded.LocalFireDepartment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -114,13 +115,13 @@ fun TodayScreen(data: Data, padding: PaddingValues) {
     ) {
         item(key = "header") {
             ScreenHeader("Today", DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.getDefault()).format(today)) {
-                IconButton(onClick = { viewing = true }, Modifier.semantics { contentDescription = "View options" }) { Icon(Icons.Rounded.Tune, null) }
                 SearchAction()
+                CircleAction(Icons.Rounded.Tune, "View options") { viewing = true }
             }
         }
         val total = doneToday + due.size + overdue.size
         if (total > 0) {
-            item(key = "progress") { DayProgress(doneToday, total, data.settings.dailyGoal) }
+            item(key = "progress") { DayProgress(data, doneToday, total, due + overdue, today) }
         }
         if (overdue.isNotEmpty()) {
             item(key = "overdue") {
@@ -132,15 +133,15 @@ fun TodayScreen(data: Data, padding: PaddingValues) {
                     }) { Text("Reschedule") }
                 }
             }
-            items(overdue, key = { it.id }) { t ->
-                SwipeTask(t, Modifier.animateItem()) { TaskRow(t, data) { nav.push(Page.TaskPage(t.id)) } }
+            cardItems(overdue, key = { it.id }) { t, seg ->
+                SwipeTask(t, Modifier.animateItem().then(seg)) { TaskRow(t, data) { nav.push(Page.TaskPage(t.id)) } }
             }
             item(key = "today-header") { SectionHeader(Dates.dayHeading(today, today)) }
         }
         for ((heading, list) in Dates.grouped(due, options.copy(group = if (options.group == GroupBy.DATE) GroupBy.NONE else options.group), data, today)) {
             if (heading.isNotEmpty()) item(key = "g-$heading") { SectionHeader(heading) }
-            items(list, key = { "$heading|${it.id}" }) { t ->
-                SwipeTask(t, Modifier.animateItem()) { TaskRow(t, data, showDue = t.time != null, timeOnly = true) { nav.push(Page.TaskPage(t.id)) } }
+            cardItems(list, key = { "$heading|${it.id}" }) { t, seg ->
+                SwipeTask(t, Modifier.animateItem().then(seg)) { TaskRow(t, data, showDue = t.time != null, timeOnly = true) { nav.push(Page.TaskPage(t.id)) } }
             }
         }
         if (overdue.isEmpty() && due.isEmpty()) {
@@ -158,7 +159,7 @@ fun TodayScreen(data: Data, padding: PaddingValues) {
         }
         if (options.showCompleted && completed.isNotEmpty()) {
             item(key = "done-h") { SectionHeader("Completed today · ${completed.size}") }
-            items(completed, key = { "done-" + it.id }) { t -> TaskRow(t, data) { nav.push(Page.TaskPage(t.id)) } }
+            cardItems(completed, key = { "done-" + it.id }) { t, seg -> TaskRow(t, data, seg) { nav.push(Page.TaskPage(t.id)) } }
         }
     }
     if (viewing) {
@@ -171,22 +172,63 @@ fun TodayScreen(data: Data, padding: PaddingValues) {
     }
 }
 
+/** Today at a glance: a ring for what's done, what's left and how long it should take, and your streak. */
 @Composable
-private fun DayProgress(done: Int, total: Int, goal: Int) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        LinearProgressIndicator(
-            progress = { if (total == 0) 0f else done / total.toFloat() },
-            modifier = Modifier.weight(1f).height(6.dp).clip(CircleShape),
-            color = LocalExtra.current.today,
-            trackColor = MaterialTheme.colorScheme.surfaceVariant,
-            drawStopIndicator = {},
-        )
-        Text(
-            "$done/$total done" + if (done >= goal) " · goal met" else "",
-            Modifier.padding(start = 12.dp),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+private fun DayProgress(data: Data, done: Int, total: Int, open: List<Task>, today: LocalDate) {
+    val left = total - done
+    val minutes = open.sumOf { it.duration ?: 0 }
+    val karma = if (data.settings.karma) remember(data.activity, data.tasks, today) { io.github.akrishna87.doable.model.Karma.compute(data, today) } else null
+    val accent = MaterialTheme.colorScheme.primary
+    val on = MaterialTheme.colorScheme.onPrimary
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp)
+            .softShadow(RoundedCornerShape(24.dp), 8.dp)
+            .clip(RoundedCornerShape(24.dp))
+            .background(accent)
+            .padding(16.dp)
+            .semantics(mergeDescendants = true) {},
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        ProgressRing(if (total == 0) 0f else done / total.toFloat(), 64.dp, 7.dp, on, on.copy(alpha = 0.25f)) {
+            Text("$done/$total", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold), color = on)
+        }
+        Column(Modifier.weight(1f).padding(start = 16.dp)) {
+            Text(
+                when {
+                    left == 0 -> "Everything's done"
+                    left == 1 -> "1 task left today"
+                    else -> "$left tasks left today"
+                },
+                style = MaterialTheme.typography.titleMedium,
+                color = on,
+            )
+            Text(
+                if (minutes > 0) "About ${Dates.durationLabel(minutes)} planned" else if (done >= data.settings.dailyGoal) "Daily goal met" else "Goal: ${data.settings.dailyGoal} a day",
+                style = MaterialTheme.typography.bodySmall,
+                color = on.copy(alpha = 0.9f),
+            )
+            if (karma != null) {
+                Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (karma.dailyStreak > 0) {
+                        Row(
+                            Modifier.clip(CircleShape).background(on.copy(alpha = 0.18f)).padding(horizontal = 9.dp, vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Rounded.LocalFireDepartment, null, Modifier.size(13.dp), tint = on)
+                            Text(" ${karma.dailyStreak}-day streak", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = on)
+                        }
+                    }
+                    Text(
+                        karma.level,
+                        Modifier.clip(CircleShape).background(on.copy(alpha = 0.18f)).padding(horizontal = 9.dp, vertical = 3.dp),
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                        color = on,
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -234,6 +276,15 @@ fun UpcomingScreen(data: Data, padding: PaddingValues) {
             Dates.dueOn(data.tasks, d).forEach { add(UpRow.Item(it)) }
         }
     }
+    // Where each task sits in its day's card.
+    val segments = remember(rows) {
+        val out = HashMap<String, Pair<Int, Int>>()
+        var run = ArrayList<UpRow.Item>()
+        fun flush() { run.forEachIndexed { i, r -> out[r.key] = i to run.size }; run = ArrayList() }
+        for (r in rows) if (r is UpRow.Item) run.add(r) else flush()
+        flush()
+        out
+    }
     fun jump(day: LocalDate) {
         val d = if (day.isBefore(today)) today else day
         selected = d
@@ -253,18 +304,14 @@ fun UpcomingScreen(data: Data, padding: PaddingValues) {
             selected.month.getDisplayName(TextStyle.FULL_STANDALONE, Locale.getDefault()) + " " + selected.year,
         ) {
             if (!monthView && weekStart != firstWeek) TextButton(onClick = { jump(today) }) { Text("Today") }
-            IconButton(onClick = { monthView = !monthView }, Modifier.semantics { contentDescription = if (monthView) "Show as list" else "Show as month" }) {
-                Icon(if (monthView) Icons.AutoMirrored.Rounded.ViewList else Icons.Rounded.CalendarMonth, null)
-            }
-            if (!monthView) IconButton(onClick = { picking = true }, Modifier.semantics { contentDescription = "Pick a date" }) { Icon(Icons.Rounded.EventAvailable, null) }
-            SearchAction()
+            CircleAction(if (monthView) Icons.AutoMirrored.Rounded.ViewList else Icons.Rounded.CalendarMonth, if (monthView) "Show as list" else "Show as month") { monthView = !monthView }
+            if (!monthView) CircleAction(Icons.Rounded.EventAvailable, "Pick a date") { picking = true }
         }
         if (monthView) {
             TaskMonth(data.tasks.filter { !it.done }, data, padding.calculateBottomPadding())
             return@Column
         }
         WeekStrip(weekStart, selected, today, data, ws, onWeek = { weekStart = it }, onDay = { jump(it) })
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         LazyColumn(
             Modifier.weight(1f),
             state = listState,
@@ -274,7 +321,7 @@ fun UpcomingScreen(data: Data, padding: PaddingValues) {
                 when (row) {
                     UpRow.Overdue -> SectionHeader("Overdue", color = extra.overdue)
                     is UpRow.Day -> DayHeader(row.day, today) { nav.quickAdd = QuickAddDefaults(due = row.day) }
-                    is UpRow.Item -> SwipeTask(row.task, Modifier.animateItem()) {
+                    is UpRow.Item -> SwipeTask(row.task, Modifier.animateItem().cardSegment(segments[row.key]?.first ?: 0, segments[row.key]?.second ?: 1)) {
                         val overdueRow = row.task.due?.isBefore(today) == true
                         TaskRow(row.task, data, showDue = row.task.time != null || overdueRow, timeOnly = !overdueRow) {
                             nav.push(Page.TaskPage(row.task.id))
@@ -346,12 +393,11 @@ fun TaskMonth(tasks: List<Task>, data: Data, bottom: androidx.compose.ui.unit.Dp
                 }
             }
         }
-        HorizontalDivider(Modifier.padding(top = 4.dp), color = MaterialTheme.colorScheme.outlineVariant)
         val list = Dates.sorted(byDay[selected].orEmpty(), ViewOptions(sort = SortBy.DATE))
         LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = bottom + 88.dp)) {
             item { DayHeader(selected, today) { nav.quickAdd = defaults.copy(due = selected) } }
             if (list.isEmpty()) item { Text("Nothing due", Modifier.padding(20.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            items(list, key = { it.id }) { t -> SwipeTask(t) { TaskRow(t, data, showDue = t.time != null, timeOnly = true) { nav.push(Page.TaskPage(t.id)) } } }
+            cardItems(list, key = { it.id }) { t, seg -> SwipeTask(t, seg) { TaskRow(t, data, showDue = t.time != null, timeOnly = true) { nav.push(Page.TaskPage(t.id)) } } }
         }
     }
 }
@@ -370,7 +416,11 @@ private fun WeekStrip(
         (0 until 7).map { weekStart.plusDays(it.toLong()) }.filter { d -> data.tasks.any { !it.done && it.due == d } }.toSet()
     }
     val firstWeek = Dates.startOfWeek(today, ws)
-    Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+    val stripShape = RoundedCornerShape(22.dp)
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).softShadow(stripShape, 3.dp).clip(stripShape).background(LocalKit.current.card).padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         IconButton(
             onClick = { onWeek(weekStart.minusWeeks(1)) },
             enabled = weekStart.isAfter(firstWeek),
@@ -400,7 +450,7 @@ private fun WeekStrip(
                     Text(
                         d.dayOfMonth.toString(),
                         style = MaterialTheme.typography.titleMedium,
-                        fontWeight = if (d == today || isSelected) FontWeight.Bold else FontWeight.Normal,
+                        fontWeight = if (d == today || isSelected) FontWeight.ExtraBold else FontWeight.SemiBold,
                         color = fg,
                     )
                     Box(
@@ -424,18 +474,17 @@ private fun WeekStrip(
 private fun DayHeader(day: LocalDate, today: LocalDate, onAdd: () -> Unit) {
     val heading = Dates.dayHeading(day, today)
     Column {
-        Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 4.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().padding(start = 22.dp, end = 8.dp, top = 14.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(
                 heading,
                 Modifier.weight(1f),
-                style = MaterialTheme.typography.titleSmall,
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
                 color = if (day == today) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
             )
             IconButton(onClick = onAdd, Modifier.semantics { contentDescription = "Add task for $heading" }) {
-                Icon(Icons.Rounded.Add, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Icon(Icons.Rounded.Add, null, tint = MaterialTheme.colorScheme.primary)
             }
         }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
     }
 }
 
@@ -575,7 +624,7 @@ fun ProjectPage(id: String, data: Data) {
                 }
                 if (options.showCompleted && done.isNotEmpty()) {
                     item(key = "done-h") { SectionHeader("Completed · ${done.size}") }
-                    items(done, key = { "done-" + it.id }) { t -> TaskRow(t, data, showProject = false) { nav.push(Page.TaskPage(t.id)) } }
+                    cardItems(done, key = { "done-" + it.id }) { t, seg -> TaskRow(t, data, seg, showProject = false) { nav.push(Page.TaskPage(t.id)) } }
                 }
             }
         }
@@ -623,22 +672,22 @@ fun ProjectPage(id: String, data: Data) {
 /** Top-level tasks, each followed by its sub-tasks (indented, open ones only), with move arrows in reorder mode. */
 /** [group] keeps keys apart when a task shows in more than one group (grouped by label). */
 private fun LazyListScope.taskTree(list: List<Task>, open: List<Task>, data: Data, reorder: Boolean, group: String = "") {
-    for ((i, t) in list.withIndex()) {
+    // Each task followed by its sub-tasks, all in one card.
+    val rows = list.withIndex().flatMap { (i, t) ->
+        listOf(Triple(t, false, i)) + if (reorder) emptyList() else open.filter { it.parentId == t.id }.sortedWith(compareBy({ it.order }, { it.createdAt })).map { Triple(it, true, i) }
+    }
+    rows.forEachIndexed { j, (t, sub, i) ->
         item(key = "t-$group-${t.id}") {
             val nav = LocalNav.current
-            if (reorder) {
-                ReorderRow(t, data, canUp = i > 0, canDown = i < list.lastIndex,
-                    onUp = { Store.placeTask(t.id, list[i - 1].id, list) },
-                    onDown = { Store.placeTask(t.id, list.getOrNull(i + 2)?.id, list) })
-            } else {
-                SwipeTask(t, Modifier.animateItem()) { TaskRow(t, data, showProject = false) { nav.push(Page.TaskPage(t.id)) } }
-            }
-        }
-        if (!reorder) {
-            val subs = open.filter { it.parentId == t.id }.sortedWith(compareBy({ it.order }, { it.createdAt }))
-            items(subs, key = { "t-$group-${it.id}" }) { s ->
-                val nav = LocalNav.current
-                SwipeTask(s, Modifier.animateItem().padding(start = 28.dp)) { TaskRow(s, data, showProject = false) { nav.push(Page.TaskPage(s.id)) } }
+            val seg = Modifier.cardSegment(j, rows.size, inset = if (sub) 76.dp else 52.dp)
+            when {
+                reorder -> Box(seg) {
+                    ReorderRow(t, data, canUp = i > 0, canDown = i < list.lastIndex,
+                        onUp = { Store.placeTask(t.id, list[i - 1].id, list) },
+                        onDown = { Store.placeTask(t.id, list.getOrNull(i + 2)?.id, list) })
+                }
+                sub -> SwipeTask(t, Modifier.animateItem().then(seg)) { TaskRow(t, data, Modifier.padding(start = 24.dp), showProject = false) { nav.push(Page.TaskPage(t.id)) } }
+                else -> SwipeTask(t, Modifier.animateItem().then(seg)) { TaskRow(t, data, showProject = false) { nav.push(Page.TaskPage(t.id)) } }
             }
         }
     }
@@ -662,11 +711,11 @@ private fun SectionRow(s: Section, count: Int, data: Data, reorder: Boolean) {
     var deleting by remember { mutableStateOf(false) }
     Column {
         Row(
-            Modifier.fillMaxWidth().clickable { Store.saveSection(s.copy(collapsed = !s.collapsed)) }.padding(start = 8.dp, end = 4.dp, top = 12.dp),
+            Modifier.fillMaxWidth().clickable { Store.saveSection(s.copy(collapsed = !s.collapsed)) }.padding(start = 14.dp, end = 6.dp, top = 16.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(if (s.collapsed) Icons.Rounded.ChevronRight else Icons.Rounded.ExpandMore, if (s.collapsed) "Expand ${s.name}" else "Collapse ${s.name}")
-            Text(s.name, Modifier.weight(1f).padding(start = 6.dp), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            Text(s.name, Modifier.weight(1f).padding(start = 6.dp), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
             Text(count.toString(), Modifier.padding(end = 4.dp), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (reorder) {
                 IconButton(onClick = { Store.moveSection(s.id, -1) }, Modifier.semantics { contentDescription = "Move section ${s.name} up" }) { Icon(Icons.Rounded.ExpandLess, null) }
@@ -685,7 +734,6 @@ private fun SectionRow(s: Section, count: Int, data: Data, reorder: Boolean) {
                 }
             }
         }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
     }
     if (renaming) NameDialog(title = "Rename section", initial = s.name, onSave = { name, _ -> Store.saveSection(s.copy(name = name)) }, onDismiss = { renaming = false })
     if (deleting) {
@@ -727,8 +775,8 @@ private fun BoardColumn(title: String, section: Section?, projectId: String, tas
             .width(290.dp)
             .fillMaxHeight()
             .padding(horizontal = 6.dp, vertical = 4.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerLow),
+            .clip(RoundedCornerShape(22.dp))
+            .background(LocalKit.current.chip),
     ) {
         if (section != null) {
             SectionRow(section, tasks.size, data, reorder = false)
@@ -742,10 +790,9 @@ private fun BoardColumn(title: String, section: Section?, projectId: String, tas
             Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
                 for (t in tasks) {
                     Surface(
-                        Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)
-                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp)),
-                        shape = RoundedCornerShape(10.dp),
-                        color = MaterialTheme.colorScheme.surface,
+                        Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).softShadow(RoundedCornerShape(16.dp), 2.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        color = LocalKit.current.card,
                     ) {
                         val subs = open.count { it.parentId == t.id }
                         Column {
@@ -881,7 +928,7 @@ fun FilterPage(id: String, data: Data) {
                     if (many) item(key = "q-$gi") { SectionHeader("$query · ${tasks.size}") }
                     for ((heading, list) in Dates.grouped(Dates.sorted(tasks, f.options), f.options, data, today)) {
                         if (heading.isNotEmpty()) item(key = "g-$gi-$heading") { SectionHeader(heading) }
-                        items(list, key = { "t-$gi-$heading-${it.id}" }) { t -> SwipeTask(t) { TaskRow(t, data) { nav.push(Page.TaskPage(t.id)) } } }
+                        cardItems(list, key = { "t-$gi-$heading-${it.id}" }) { t, seg -> SwipeTask(t, seg) { TaskRow(t, data) { nav.push(Page.TaskPage(t.id)) } } }
                     }
                     if (tasks.isEmpty() && !many) item { EmptyState(Icons.Rounded.TaskAlt, "Nothing matches", "No open tasks match “${f.query}”.") }
                 }
@@ -936,13 +983,13 @@ private fun TaskListPage(
             if (open.isEmpty()) item(key = "empty") { EmptyState(Icons.Rounded.TaskAlt, emptyTitle, emptyMessage) }
             for ((heading, list) in Dates.grouped(Dates.sorted(open, options), options, data, today)) {
                 if (heading.isNotEmpty()) item(key = "g-$heading") { SectionHeader(heading) }
-                items(list, key = { "$heading|${it.id}" }) { t ->
-                    SwipeTask(t, Modifier.animateItem()) { TaskRow(t, data) { nav.push(Page.TaskPage(t.id)) } }
+                cardItems(list, key = { "$heading|${it.id}" }) { t, seg ->
+                    SwipeTask(t, Modifier.animateItem().then(seg)) { TaskRow(t, data) { nav.push(Page.TaskPage(t.id)) } }
                 }
             }
             if (options.showCompleted && done.isNotEmpty()) {
                 item(key = "done-h") { SectionHeader("Completed · ${done.size}") }
-                items(done, key = { "done-" + it.id }) { t -> TaskRow(t, data) { nav.push(Page.TaskPage(t.id)) } }
+                cardItems(done, key = { "done-" + it.id }) { t, seg -> TaskRow(t, data, seg) { nav.push(Page.TaskPage(t.id)) } }
             }
         }
     }
@@ -967,7 +1014,7 @@ fun CompletedPage(data: Data) {
             if (byDay.isEmpty()) item { EmptyState(Icons.Rounded.TaskAlt, "Nothing completed yet", "Tasks you complete are kept here.") }
             for ((day, tasks) in byDay) {
                 item(key = "h-$day") { SectionHeader(Dates.dayHeading(day, today)) }
-                items(tasks, key = { it.id }) { t -> TaskRow(t, data, showDue = false) { nav.push(Page.TaskPage(t.id)) } }
+                cardItems(tasks, key = { it.id }) { t, seg -> TaskRow(t, data, seg, showDue = false) { nav.push(Page.TaskPage(t.id)) } }
             }
         }
     }
